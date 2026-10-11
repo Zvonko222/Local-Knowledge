@@ -84,7 +84,7 @@ public sealed class DocumentsViewModelTests
         await File.WriteAllTextAsync(tempFile, "# hello");
         try
         {
-            await viewModel.ImportFileAsync(tempFile);
+            await viewModel.ImportFilesAsync(new[] { tempFile });
 
             Assert.Equal(1, api.AddDocumentCallCount);
             Assert.Single(viewModel.Documents);
@@ -93,6 +93,34 @@ public sealed class DocumentsViewModelTests
         finally
         {
             File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public async Task Import_WithMultipleFiles_ImportsAllAndReportsCount()
+    {
+        var api = new FakeKnowledgeApiClient();
+        var dialogs = new FakeDialogService();
+        var viewModel = CreateViewModel(api, dialogs);
+
+        var files = new List<string>();
+        for (var i = 0; i < 3; i++)
+        {
+            var tempFile = Path.Combine(Path.GetTempPath(), $"lkb-batch-{Guid.NewGuid():N}.txt");
+            await File.WriteAllTextAsync(tempFile, $"内容 {i}");
+            files.Add(tempFile);
+        }
+        try
+        {
+            await viewModel.ImportFilesAsync(files);
+
+            Assert.Equal(3, api.AddDocumentCallCount);
+            Assert.Equal(3, viewModel.Documents.Count);
+            Assert.Contains("成功 3 / 3", viewModel.StatusText);
+        }
+        finally
+        {
+            files.ForEach(File.Delete);
         }
     }
 
@@ -110,6 +138,79 @@ public sealed class DocumentsViewModelTests
 
         Assert.Equal(1, dialogs.ConfirmCallCount);
         Assert.Single(viewModel.Documents); // 用户取消，未删除
+    }
+}
+
+public sealed class TagFilterTests
+{
+    private static List<Document> SeedDocs() => new()
+    {
+        new Document { Id = "1", Title = "架构笔记", Tags = "架构,部署" },
+        new Document { Id = "2", Title = "部署指南", Tags = "部署" },
+        new Document { Id = "3", Title = "会议记录", Tags = null }
+    };
+
+    private static DocumentsViewModel CreateLoaded(FakeKnowledgeApiClient api)
+    {
+        var viewModel = new DocumentsViewModel(api, new FakeDialogService(), new StatusReporter());
+        viewModel.LoadAsync().GetAwaiter().GetResult();
+        return viewModel;
+    }
+
+    [Fact]
+    public void Load_BuildsTagChipsWithCounts()
+    {
+        var api = new FakeKnowledgeApiClient();
+        foreach (var doc in SeedDocs()) api.Documents.Add(doc);
+        var viewModel = CreateLoaded(api);
+
+        Assert.Equal(4, viewModel.TagFilters.Count); // 全部 + 架构 + 部署 + 未分类
+        Assert.Equal("全部 (3)", viewModel.TagFilters[0].Label);
+        Assert.Contains(viewModel.TagFilters, f => f.Label == "架构 (1)");
+        Assert.Contains(viewModel.TagFilters, f => f.Label == "部署 (2)");
+        Assert.Contains(viewModel.TagFilters, f => f.Label == "未分类 (1)");
+    }
+
+    [Fact]
+    public void SelectingTagChip_FiltersDocuments()
+    {
+        var api = new FakeKnowledgeApiClient();
+        foreach (var doc in SeedDocs()) api.Documents.Add(doc);
+        var viewModel = CreateLoaded(api);
+
+        viewModel.SelectedTagFilter = viewModel.TagFilters.First(f => f.Tag == "架构");
+
+        Assert.Single(viewModel.Documents);
+        // 分类芯片与关键词筛选叠加（架构笔记命中标题关键词）
+        viewModel.FilterText = "笔记";
+        Assert.Single(viewModel.Documents);
+    }
+
+    [Fact]
+    public void SelectingUntaggedChip_ShowsOnlyUntaggedDocuments()
+    {
+        var api = new FakeKnowledgeApiClient();
+        foreach (var doc in SeedDocs()) api.Documents.Add(doc);
+        var viewModel = CreateLoaded(api);
+
+        viewModel.SelectedTagFilter = viewModel.TagFilters.First(f => f.Tag == string.Empty);
+
+        Assert.Single(viewModel.Documents);
+        Assert.Equal("3", viewModel.Documents[0].Id);
+    }
+
+    [Fact]
+    public void Reload_KeepsSelection_WhenChipStillExists()
+    {
+        var api = new FakeKnowledgeApiClient();
+        foreach (var doc in SeedDocs()) api.Documents.Add(doc);
+        var viewModel = CreateLoaded(api);
+        viewModel.SelectedTagFilter = viewModel.TagFilters.First(f => f.Tag == "架构");
+
+        viewModel.LoadAsync().GetAwaiter().GetResult();
+
+        Assert.Equal("架构", viewModel.SelectedTagFilter?.Tag);
+        Assert.Single(viewModel.Documents);
     }
 }
 

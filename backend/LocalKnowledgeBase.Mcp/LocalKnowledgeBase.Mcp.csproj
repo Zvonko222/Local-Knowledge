@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>LocalKnowledgeBase.Mcp</RootNamespace>
+    <!-- stdio MCP 服务器：stdout 只输出协议报文，不能有任何额外打印 -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
+    <PackageReference Include="ModelContextProtocol" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LocalKnowledgeBase.Core\LocalKnowledgeBase.Core.csproj" />
+  </ItemGroup>
+
+</Project>

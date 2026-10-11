@@ -73,8 +73,11 @@ public sealed class FakeKnowledgeApiClient : IKnowledgeApiClient
         Task.FromResult<SearchResults?>(new SearchResults
         {
             Query = query,
+            // 模拟检索：资料命中关键词，或提问句子中提到了资料标题（问答场景）
             Results = Documents
-                .Where(d => d.Title.Contains(query, StringComparison.OrdinalIgnoreCase))
+                .Where(d => d.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                            d.Content.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                            (d.Title.Length > 0 && query.Contains(d.Title, StringComparison.OrdinalIgnoreCase)))
                 .ToList()
         });
 
@@ -124,10 +127,36 @@ public sealed class FakeKnowledgeApiClient : IKnowledgeApiClient
             .Where(m => m.Title.Contains(query, StringComparison.OrdinalIgnoreCase))
             .ToList());
 
+    public GetDataDirectoryResponse? NextDataDirectory { get; set; }
+
     public Task<GetDataDirectoryResponse?> GetDataDirectoryAsync() =>
-        Task.FromResult<GetDataDirectoryResponse?>(new GetDataDirectoryResponse { Path = null, Configured = false });
+        Task.FromResult<GetDataDirectoryResponse?>(NextDataDirectory
+            ?? new GetDataDirectoryResponse { Path = null, Configured = false });
 
     public Task<bool> SetDataDirectoryAsync(string path) => Task.FromResult(true);
+
+    public List<RelatedDocumentDto> RelatedToReturn { get; } = new();
+
+    public string CurrentProfile { get; private set; } = "standard";
+
+    public Task<RetrievalProfileDto?> GetProfileAsync() =>
+        Task.FromResult<RetrievalProfileDto?>(new RetrievalProfileDto
+        {
+            Preset = CurrentProfile,
+            MaxResults = CurrentProfile == "light" ? 3 : 6,
+            SnippetLength = CurrentProfile == "light" ? 400 : 800,
+            MaxTotalChars = CurrentProfile == "light" ? 1500 : 4000,
+            TokenWeight = CurrentProfile == "light" ? 0.4 : 1.0
+        });
+
+    public Task<RetrievalProfileDto?> SetProfileAsync(string preset)
+    {
+        CurrentProfile = preset;
+        return GetProfileAsync();
+    }
+
+    public Task<List<RelatedDocumentDto>?> GetRelatedAsync(string id, int max = 5) =>
+        Task.FromResult<List<RelatedDocumentDto>?>(RelatedToReturn.ToList());
 
     public void Dispose()
     {
@@ -137,17 +166,63 @@ public sealed class FakeKnowledgeApiClient : IKnowledgeApiClient
 /// <summary>无 UI 的 IDialogService 假实现：不弹窗，返回预设值。</summary>
 public sealed class FakeDialogService : IDialogService
 {
-    public string? NextOpenFile { get; set; }
+    public List<string> NextOpenFiles { get; } = new();
+    public string? NextSavePath { get; set; }
+    public string? NextFolder { get; set; }
     public bool NextConfirmResult { get; set; }
     public int ConfirmCallCount { get; private set; }
+    public int OpenInExplorerCallCount { get; private set; }
 
-    public string? PickOpenFile(string title, string filter, string? initialDirectory = null) => NextOpenFile;
+    public IReadOnlyList<string> PickOpenFiles(string title, string filter, string? initialDirectory = null) =>
+        NextOpenFiles;
 
-    public string? PickFolder(string title) => null;
+    public string? PickFolder(string title) => NextFolder;
+
+    public string? PickSaveFile(string title, string filter, string defaultFileName) => NextSavePath;
+
+    public void OpenInExplorer(string path) => OpenInExplorerCallCount++;
 
     public bool Confirm(string title, string message)
     {
         ConfirmCallCount++;
         return NextConfirmResult;
     }
+}
+
+/// <summary>内存版 ILlmClient：不访问网络，返回预设回答并记录收到的提示词。</summary>
+public sealed class FakeLlmClient : ILlmClient
+{
+    public string BaseUrl { get; private set; } = "http://localhost:11434/v1";
+    public string Model { get; private set; } = string.Empty;
+    public string ApiKey { get; private set; } = string.Empty;
+    public bool Configured { get; private set; }
+    public int CompleteCallCount { get; private set; }
+    public string? LastSystemPrompt { get; private set; }
+    public string? LastUserPrompt { get; private set; }
+    public string NextAnswer { get; set; } = "（测试回答）依据资料 [1] 得出结论。";
+    public bool TestResult { get; set; }
+    /// <summary>为 true 时 CompleteAsync 抛异常，用于测试失败路径。</summary>
+    public bool ThrowOnComplete { get; set; }
+
+    public void Configure(string baseUrl, string model, string apiKey = "")
+    {
+        BaseUrl = baseUrl.TrimEnd('/') + "/";
+        Model = model;
+        ApiKey = apiKey;
+        Configured = true;
+    }
+
+    public Task<string> CompleteAsync(string systemPrompt, string userPrompt, CancellationToken cancellationToken = default)
+    {
+        if (ThrowOnComplete)
+            throw new InvalidOperationException("模拟的模型连接失败。");
+
+        CompleteCallCount++;
+        LastSystemPrompt = systemPrompt;
+        LastUserPrompt = userPrompt;
+        return Task.FromResult(NextAnswer);
+    }
+
+    public Task<bool> TestConnectionAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(TestResult);
 }

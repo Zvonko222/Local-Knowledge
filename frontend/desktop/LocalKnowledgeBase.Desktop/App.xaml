@@ -13,6 +13,7 @@
 
             <converters:ResponsivePageWidthConverter x:Key="ResponsivePageWidthConverter" />
             <converters:FileSizeConverter x:Key="FileSizeConverter" />
+            <converters:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility" />
             <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
 
             <!-- 页面 ViewModel → View 映射：内容区显示某个页面 ViewModel 时自动实例化对应视图。 -->
@@ -21,6 +22,9 @@
             </DataTemplate>
             <DataTemplate DataType="{x:Type vm:MemoryViewModel}">
                 <views:MemoryPage />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:ChatViewModel}">
+                <views:ChatPage />
             </DataTemplate>
             <DataTemplate DataType="{x:Type vm:SearchViewModel}">
                 <views:SearchPage />

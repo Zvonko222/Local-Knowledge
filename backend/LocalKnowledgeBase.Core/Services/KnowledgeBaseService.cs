@@ -260,19 +260,144 @@ public class KnowledgeBaseService : IDisposable
 
     #region Search operations
 
-    public List<Document> SearchDocuments(string query, int maxResults = 20)
+    // 检索分词用的分隔符：空白 + 中英文常见标点（用户常直接粘贴整句提问）
+    private static readonly char[] QuerySeparators =
+        [' ', '\t', '\r', '\n', '，', '。', '？', '！', '；', '、', '：', '（', '）', '《', '》', '“', '”',
+         ',', '.', '?', '!', ';', ':', '(', ')', '<', '>', '"', '\''];
+
+    /// <summary>
+    /// 把查询拆成关键词：按空白和中英文标点切分、去重。
+    /// 这样整句提问（如“项目采用了什么架构？数据保存在哪里？”）也能命中。
+    /// </summary>
+    public static List<string> TokenizeQuery(string query) =>
+        (query ?? string.Empty)
+            .Split(QuerySeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    /// <summary>单条资料的相关度得分：
+    /// 每个关键词——标题命中 ×8、标签 ×4、正文按出现次数 ×2（单词最多计 5 次）；
+    /// 关键词不少于 2 个且全部命中时额外 +8（覆盖加成）。</summary>
+    public static int ScoreText(string title, string? tags, string content, List<string> terms)
+    {
+        if (terms.Count == 0)
+            return 0;
+
+        var score = 0;
+        var matchedTerms = 0;
+        foreach (var term in terms)
+        {
+            var termMatched = false;
+            if (title.Contains(term, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 8;
+                termMatched = true;
+            }
+            if (tags?.Contains(term, StringComparison.OrdinalIgnoreCase) == true)
+            {
+                score += 4;
+                termMatched = true;
+            }
+            var occurrences = CountOccurrences(content, term);
+            if ( occurrences > 0)
+            {
+                score += 2 * Math.Min(occurrences, 5);
+                termMatched = true;
+            }
+            if (termMatched)
+                matchedTerms++;
+        }
+
+        if (terms.Count >= 2 && matchedTerms == terms.Count)
+            score += 8; // 多关键词全覆盖加成
+
+        return score;
+    }
+
+    /// <summary>统计词在文本中的出现次数（不区分大小写）。</summary>
+    public static int CountOccurrences(string text, string term)
+    {
+        if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(term))
+            return 0;
+
+        var count = 0;
+        var index = 0;
+        while ((index = text.IndexOf(term, index, StringComparison.OrdinalIgnoreCase)) >= 0)
+        {
+            count++;
+            index += term.Length;
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// 智能摘要：优先截取包含关键词的窗口（关键词出现在窗口前 1/4 处），
+    /// 无命中时退化为从头截取。结果不超过 maxLength + 省略号。
+    /// </summary>
+    public static string BestSnippet(string text, IReadOnlyList<string> terms, int maxLength)
+    {
+        if (string.IsNullOrEmpty(text) || text.Length <= maxLength)
+            return text ?? string.Empty;
+
+        var firstHit = -1;
+        foreach (var term in terms)
+        {
+            var index = text.IndexOf(term, StringComparison.OrdinalIgnoreCase);
+            if (index >= 0 && (firstHit < 0 || index < firstHit))
+                firstHit = index;
+        }
+
+        var start = firstHit < 0 ? 0 : Math.Max(0, firstHit - maxLength / 4);
+        if (start > text.Length - maxLength)
+            start = Math.Max(0, text.Length - maxLength);
+
+        var slice = text.Substring(start, Math.Min(maxLength, text.Length - start));
+        var prefix = start > 0 ? "…" : string.Empty;
+        var suffix = start + slice.Length < text.Length ? "…" : string.Empty;
+        return prefix + slice + suffix;
+    }
+
+    /// <summary>语义命中换算成分数的系数：余弦相似度 ∈ [-1,1]，×10 后与关键词分同量纲。</summary>
+    public const double SemanticWeight = 10.0;
+
+    /// <summary>
+    /// 全文检索文档（混合检索）：
+    /// - 关键词分：按分词打分（标题 ×5 / 标签 ×3 / 正文 ×1）；
+    /// - 语义分：传入 queryVector 时，对每篇文档计算余弦相似度 × <see cref="SemanticWeight"/>；
+    /// - 总分 = 关键词分 + 语义分，按总分排序（同分按更新时间），总分 > 0 才返回。
+    /// queryVector 为 null 时退化为纯关键词检索。
+    /// </summary>
+    public List<Document> SearchDocuments(string query, int maxResults = 20,
+        VectorIndexService? vectorIndex = null, float[]? queryVector = null)
     {
         lock (_lock)
         {
-            if (string.IsNullOrWhiteSpace(query))
+            var terms = TokenizeQuery(query);
+            var useSemantic = queryVector is { Length: > 0 } && vectorIndex is not null;
+            if (terms.Count == 0 && !useSemantic)
                 return new List<Document>();
 
-            var lowerQuery = query.ToLowerInvariant();
             return _documents!
-                .Where(d => d.Title.Contains(lowerQuery, StringComparison.OrdinalIgnoreCase) ||
-                           d.Content.Contains(lowerQuery, StringComparison.OrdinalIgnoreCase) ||
-                           (d.Tags?.Contains(lowerQuery, StringComparison.OrdinalIgnoreCase) ?? false))
+                .Select(d =>
+                {
+                    var score = (double)ScoreText(d.Title, d.Tags, d.Content, terms);
+                    if (useSemantic)
+                    {
+                        var record = vectorIndex!.Get(d.Id);
+                        if (record is { } rec && rec.Vector.Length == queryVector!.Length)
+                        {
+                            var cosine = VectorIndexService.CosineSimilarity(queryVector, rec.Vector);
+                            if (cosine > 0)
+                                score += cosine * SemanticWeight;
+                        }
+                    }
+                    return (Doc: d, Score: score);
+                })
+                .Where(x => x.Score > 0)
+                .OrderByDescending(x => x.Score)
+                .ThenByDescending(x => x.Doc.UpdatedAt)
                 .Take(Math.Clamp(maxResults, 1, 100))
+                .Select(x => x.Doc)
                 .ToList();
         }
     }
@@ -338,17 +463,21 @@ public class KnowledgeBaseService : IDisposable
         }
     }
 
+    /// <summary>检索项目记忆：与文档检索同样的关键词打分排序。</summary>
     public List<MemoryEntry> SearchMemoryEntries(string query)
     {
         lock (_lock)
         {
-            var lowerQuery = query.ToLowerInvariant();
-            var lowerQueryTrimmed = lowerQuery.Trim();
+            var terms = TokenizeQuery(query);
+            if (terms.Count == 0)
+                return new List<MemoryEntry>();
 
             return _memoryEntries!
-                .Where(m => m.Title.Contains(lowerQueryTrimmed, StringComparison.OrdinalIgnoreCase) ||
-                           m.Content.Contains(lowerQueryTrimmed, StringComparison.OrdinalIgnoreCase) ||
-                           (m.Tags?.Contains(lowerQueryTrimmed, StringComparison.OrdinalIgnoreCase) ?? false))
+                .Select(m => (Entry: m, Score: ScoreText(m.Title, m.Tags, m.Content, terms)))
+                .Where(x => x.Score > 0)
+                .OrderByDescending(x => x.Score)
+                .ThenByDescending(x => x.Entry.UpdatedAt)
+                .Select(x => x.Entry)
                 .ToList();
         }
     }
@@ -396,14 +525,8 @@ public class KnowledgeBaseService : IDisposable
 
     private static string ExtractTextFromStream(Stream stream, string filePath)
     {
-        var ext = Path.GetExtension(filePath)?.ToLowerInvariant();
-
-        return ext switch
-        {
-            ".txt" => ReadAllText(stream),
-            ".md" => ReadAllText(stream),
-            _ => ReadAllText(stream) // Default: read as text
-        };
+        // 提取逻辑统一在 TextExtractor：pdf/docx 专用解析，其余按文本读取
+        return TextExtractor.Extract(stream, filePath);
     }
 
     private static string ReadAllText(Stream stream)
@@ -413,6 +536,9 @@ public class KnowledgeBaseService : IDisposable
     }
 
     #endregion
+
+    /// <summary>公开的标签规范化（去空白、去重、逗号分隔），供 API 导入时使用。</summary>
+    public static string? NormalizeTagsPublic(string? tags) => NormalizeTags(tags);
 
     private static string? NormalizeTags(string? tags)
     {

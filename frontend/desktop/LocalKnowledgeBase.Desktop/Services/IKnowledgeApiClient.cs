@@ -37,4 +37,31 @@ public interface IKnowledgeApiClient : IDisposable
 
     Task<GetDataDirectoryResponse?> GetDataDirectoryAsync();
     Task<bool> SetDataDirectoryAsync(string path);
+
+    /// <summary>与指定文档语义最相关的其他文档（基于后端向量索引）。</summary>
+    Task<List<RelatedDocumentDto>?> GetRelatedAsync(string id, int max = 5);
+
+    /// <summary>读取当前检索预算档位。</summary>
+    Task<RetrievalProfileDto?> GetProfileAsync();
+
+    /// <summary>切换检索预算档位（light / standard / deep），对所有检索入口生效。</summary>
+    Task<RetrievalProfileDto?> SetProfileAsync(string preset);
+}
+
+/// <summary>检索预算档位信息。</summary>
+public class RetrievalProfileDto
+{
+    public string Preset { get; set; } = string.Empty;
+    public int MaxResults { get; set; }
+    public int SnippetLength { get; set; }
+    public int MaxTotalChars { get; set; }
+    public double TokenWeight { get; set; }
+}
+
+/// <summary>相关文档条目：标题、编号与相似度（0~1）。</summary>
+public class RelatedDocumentDto
+{
+    public string Title { get; set; } = string.Empty;
+    public string DocumentId { get; set; } = string.Empty;
+    public double Similarity { get; set; }
 }

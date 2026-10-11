@@ -68,6 +68,36 @@
                         </Button>
 
                         <Button Grid.Column="2"
+                                Width="108"
+                                Margin="8,0,0,0"
+                                Style="{StaticResource SecondaryButton}"
+                                ToolTip="在资源管理器中打开数据目录，便于查看与备份"
+                                Command="{Binding OpenDataDirectoryCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE838;"
+                                           Margin="0,0,7,0"
+                                           FontFamily="{StaticResource IconFont}"
+                                           FontSize="14" />
+                                <TextBlock Text="打开目录" />
+                            </StackPanel>
+                        </Button>
+
+                        <Button Grid.Column="3"
+                                Width="96"
+                                Margin="8,0,0,0"
+                                Style="{StaticResource SecondaryButton}"
+                                ToolTip="把整个数据目录压缩为一个 ZIP 备份文件"
+                                Command="{Binding BackupDataCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE8E5;"
+                                           Margin="0,0,7,0"
+                                           FontFamily="{StaticResource IconFont}"
+                                           FontSize="14" />
+                                <TextBlock Text="备份" />
+                            </StackPanel>
+                        </Button>
+
+                        <Button Grid.Column="4"
                                 Width="76"
                                 Margin="8,0,0,0"
                                 Content="应用"
@@ -136,6 +166,151 @@
                         <TextBlock Text="{Binding ApiStatusText}"
                                    Style="{StaticResource CaptionText}"
                                    Foreground="{StaticResource TextSecondaryBrush}" />
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,14">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="检索预算（token 消耗）" Style="{StaticResource HeadingMedium}" />
+                            <TextBlock Text="选择档位后，搜索、问答与 AI 检索自动按该档限制单次上下文规模。"
+                                       Margin="0,4,0,0"
+                                       Style="{StaticResource CaptionText}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid Margin="0,16,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <ComboBox Height="38"
+                                  VerticalContentAlignment="Center"
+                                  FontSize="13"
+                                  ItemsSource="{Binding ProfileOptions}"
+                                  SelectedItem="{Binding ProfileLabel}" />
+
+                        <Button Grid.Column="1"
+                                Width="96"
+                                Height="38"
+                                Margin="10,0,0,0"
+                                Style="{StaticResource PrimaryButton}"
+                                Content="应用"
+                                Command="{Binding ApplyProfileCommand}" />
+                    </Grid>
+
+                    <Border Margin="0,12,0,0"
+                            Padding="10,8"
+                            CornerRadius="6"
+                            Background="#F7F9F7">
+                        <TextBlock Text="{Binding ProfileStatusText}"
+                                   Style="{StaticResource CaptionText}"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   TextWrapping="Wrap" />
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,14">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="本地模型（AI 问答）" Style="{StaticResource HeadingMedium}" />
+                            <TextBlock Text="OpenAI 兼容接口：云端 API（GLM、DeepSeek 等，需密钥）或本地服务（Ollama 等）均可。问答时先检索知识库，再交由该模型生成回答。"
+                                       Margin="0,4,0,0"
+                                       Style="{StaticResource CaptionText}" />
+                        </StackPanel>
+                        <Border Grid.Column="1"
+                                Padding="9,5"
+                                CornerRadius="12"
+                                Background="#EAF3F8">
+                            <TextBlock Text="不出本机"
+                                       Foreground="#1F6F8B"
+                                       FontSize="11"
+                                       FontWeight="SemiBold" />
+                        </Border>
+                    </Grid>
+
+                    <Grid Margin="0,18,0,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.2*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBox ToolTip="OpenAI 兼容接口地址，例如 https://open.bigmodel.cn/api/paas/v4 或 http://localhost:11434/v1"
+                                 Text="{Binding LlmBaseUrl, UpdateSourceTrigger=PropertyChanged}"
+                                 Style="{StaticResource ModernTextBox}" />
+
+                        <TextBox Grid.Column="1"
+                                 Margin="8,0,0,0"
+                                 ToolTip="模型名称，例如 glm-4.7、deepseek-chat、qwen2.5:7b"
+                                 Text="{Binding LlmModel, UpdateSourceTrigger=PropertyChanged}"
+                                 Style="{StaticResource ModernTextBox}" />
+
+                        <TextBox Grid.Row="1"
+                                 Grid.ColumnSpan="2"
+                                 Margin="0,8,0,0"
+                                 ToolTip="云端 API（GLM / DeepSeek / OpenAI 等）必填；本地服务（Ollama 等）留空"
+                                 Text="{Binding LlmApiKey, UpdateSourceTrigger=PropertyChanged}"
+                                 Style="{StaticResource ModernTextBox}" />
+
+                        <Button Grid.Row="2"
+                                Grid.Column="2"
+                                Width="96"
+                                Margin="10,8,0,0"
+                                Style="{StaticResource SecondaryButton}"
+                                Command="{Binding ApplyLlmSettingsCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE71B;"
+                                           Margin="0,0,7,0"
+                                           FontFamily="{StaticResource IconFont}"
+                                           FontSize="14" />
+                                <TextBlock Text="应用" />
+                            </StackPanel>
+                        </Button>
+
+                        <Button Grid.Row="2"
+                                Grid.Column="3"
+                                Width="104"
+                                Margin="8,8,0,0"
+                                Style="{StaticResource PrimaryButton}"
+                                Command="{Binding TestLlmCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE72C;"
+                                           Margin="0,0,7,0"
+                                           FontFamily="{StaticResource IconFont}"
+                                           FontSize="14" />
+                                <TextBlock Text="测试连接" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+
+                    <Border Margin="0,12,0,0"
+                            Padding="10,8"
+                            CornerRadius="6"
+                            Background="#F7F9F7">
+                        <TextBlock Text="{Binding LlmStatusText}"
+                                   Style="{StaticResource CaptionText}"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   TextWrapping="Wrap" />
                     </Border>
                 </StackPanel>
             </Border>

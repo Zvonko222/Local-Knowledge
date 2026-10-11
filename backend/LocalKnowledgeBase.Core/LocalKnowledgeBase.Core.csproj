@@ -4,4 +4,9 @@
     <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- PDF 本地文本解析（纯 .NET，无网络调用、无原生依赖） -->
+    <PackageReference Include="PdfPig" />
+  </ItemGroup>
+
 </Project>

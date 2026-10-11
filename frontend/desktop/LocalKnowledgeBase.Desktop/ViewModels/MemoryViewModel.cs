@@ -21,6 +21,8 @@ public sealed class MemoryViewModel : PageViewModelBase
     private MemoryEntry? _selectedEntry;
     private string? _editingId;
     private string _statusText = string.Empty;
+    private string _filterText = string.Empty;
+    private List<MemoryEntry> _allEntries = new();
 
     public MemoryViewModel(IKnowledgeApiClient api, IDialogService dialogs, IStatusReporter status)
     {
@@ -40,6 +42,17 @@ public sealed class MemoryViewModel : PageViewModelBase
     public ICommand SaveCommand { get; }
     public ICommand ClearCommand { get; }
     public ICommand DeleteCommand { get; }
+
+    /// <summary>本地筛选关键词（标题、标签、正文），输入即过滤，不请求 API。</summary>
+    public string FilterText
+    {
+        get => _filterText;
+        set
+        {
+            if (SetField(ref _filterText, value))
+                ApplyEntryFilter();
+        }
+    }
 
     /// <summary>是否处于“编辑已有条目”状态（区别于新建）。</summary>
     public bool IsEditing => _editingId is not null;
@@ -102,10 +115,27 @@ public sealed class MemoryViewModel : PageViewModelBase
             return;
         }
 
+        _allEntries = entries;
+        ApplyEntryFilter();
+    }
+
+    private void ApplyEntryFilter()
+    {
+        var query = _filterText.Trim();
+        var filtered = query.Length == 0
+            ? _allEntries
+            : _allEntries.Where(entry =>
+                entry.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                entry.Content.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                (entry.Tags?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false))
+                .ToList();
+
         Entries.Clear();
-        foreach (var entry in entries)
+        foreach (var entry in filtered)
             Entries.Add(entry);
-        StatusText = $"共 {entries.Count} 条记忆";
+        StatusText = filtered.Count == _allEntries.Count
+            ? $"共 {_allEntries.Count} 条记忆"
+            : $"显示 {filtered.Count} / {_allEntries.Count}";
     }
 
     public async Task SaveAsync()

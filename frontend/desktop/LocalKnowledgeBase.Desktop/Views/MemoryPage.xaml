@@ -132,9 +132,31 @@
                 </StackPanel>
             </Border>
 
-            <TextBlock Text="记忆列表"
-                       Margin="0,0,0,10"
-                       Style="{StaticResource HeadingMedium}" />
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="记忆列表"
+                           VerticalAlignment="Center"
+                           Style="{StaticResource HeadingMedium}" />
+
+                <TextBox Grid.Column="1"
+                         Width="240"
+                         Height="36"
+                         ToolTip="按标题、标签或正文筛选"
+                         Text="{Binding FilterText, UpdateSourceTrigger=PropertyChanged}"
+                         Style="{StaticResource ModernTextBox}" />
+
+                <Button Grid.Column="2"
+                        Width="82"
+                        Height="36"
+                        Margin="8,0,0,0"
+                        Content="清空"
+                        Style="{StaticResource SecondaryButton}"
+                        Click="ClearFilterButton_Click" />
+            </Grid>
 
             <DataGrid Height="300"
                       Style="{StaticResource ModernDataGrid}"

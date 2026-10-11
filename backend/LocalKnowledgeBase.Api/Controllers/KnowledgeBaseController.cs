@@ -9,10 +9,52 @@ namespace LocalKnowledgeBase.Api.Controllers;
 public sealed class KnowledgeBaseController : ControllerBase
 {
     private readonly KnowledgeBaseService _service;
+    private readonly VectorIndexService? _vectors;
+    private readonly EmbeddingClient? _embedder;
+    private readonly RetrievalProfileService? _profiles;
 
-    public KnowledgeBaseController(KnowledgeBaseService service)
+    public KnowledgeBaseController(KnowledgeBaseService service,
+        VectorIndexService? vectors = null, EmbeddingClient? embedder = null,
+        RetrievalProfileService? profiles = null)
     {
         _service = service;
+        _vectors = vectors;
+        _embedder = embedder;
+        _profiles = profiles;
+    }
+
+    /// <summary>为文档生成向量并写入索引（未配置 embedding 时跳过，失败不影响主流程）。</summary>
+    private async Task TryIndexDocumentAsync(Document document)
+    {
+        if (_embedder is null || _vectors is null || string.IsNullOrEmpty(document.Content))
+            return;
+        try
+        {
+            var vector = await _embedder.EmbedAsync(document.Title + "\n" + document.Content);
+            if (vector is { Length: > 0 })
+                _vectors.Set(document.Id, _embedder.Model, vector);
+        }
+        catch
+        {
+            // 向量索引失败不影响文档主流程；可用 POST /api/ai/index/rebuild 重建
+        }
+    }
+
+    /// <summary>混合检索的查询向量：embedding 未配置、索引为空或模型不一致时返回 null（退化纯关键词）。</summary>
+    private async Task<float[]?> TryEmbedQueryAsync(string query)
+    {
+        if (_embedder is null || _vectors is null || _vectors.Count == 0)
+            return null;
+        if (_vectors.StoredModel != _embedder.Model)
+            return null; // 索引由其他模型生成，需 POST /api/ai/index/rebuild 重建
+        try
+        {
+            return await _embedder.EmbedAsync(query);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     #region Status
@@ -37,6 +79,7 @@ public sealed class KnowledgeBaseController : ControllerBase
         {
             _service.Reconfigure(request.Path);
             KnowledgeBaseService.SetUserDataDirectory(request.Path);
+            _vectors?.Reconfigure(request.Path); // 向量索引跟随数据目录切换
             return Ok(new { message = "Data directory updated." });
         }
         catch (Exception ex)
@@ -100,7 +143,8 @@ public sealed class KnowledgeBaseController : ControllerBase
                     : request.Title.Trim(),
                 FileType = Path.GetExtension(originalFileName),
                 OriginalFileName = originalFileName,
-                StoredFileName = Guid.NewGuid().ToString("N") + Path.GetExtension(originalFileName)
+                StoredFileName = Guid.NewGuid().ToString("N") + Path.GetExtension(originalFileName),
+                Tags = KnowledgeBaseService.NormalizeTagsPublic(request.Tags)
             };
 
             // Write raw file
@@ -116,6 +160,7 @@ public sealed class KnowledgeBaseController : ControllerBase
             document.Content = content;
 
             _service.AddDocument(document);
+            await TryIndexDocumentAsync(document); // 配置了 embedding 时同步写入向量索引
             return CreatedAtAction(nameof(GetDocument), new { id = document.Id }, document);
         }
         catch (Exception ex)
@@ -125,7 +170,7 @@ public sealed class KnowledgeBaseController : ControllerBase
     }
 
     [HttpPut("documents/{id}")]
-    public ActionResult<Document> UpdateDocument(string id, [FromBody] UpdateDocumentRequest request)
+    public async Task<ActionResult<Document>> UpdateDocument(string id, [FromBody] UpdateDocumentRequest request)
     {
         try
         {
@@ -136,6 +181,7 @@ public sealed class KnowledgeBaseController : ControllerBase
             if (document == null)
                 return NotFound(new { error = "Document not found" });
 
+            await TryIndexDocumentAsync(document); // 正文变化后刷新向量
             return Ok(document);
         }
         catch (Exception ex)
@@ -154,7 +200,10 @@ public sealed class KnowledgeBaseController : ControllerBase
                 return NotFound(new { error = "Document not found" });
 
             if (_service.DeleteDocument(id))
+            {
+                _vectors?.Remove(id); // 同步移除向量
                 return Ok(new { message = "Document deleted" });
+            }
 
             return StatusCode(500, new { error = "Failed to delete" });
         }
@@ -169,11 +218,15 @@ public sealed class KnowledgeBaseController : ControllerBase
     #region Search
 
     [HttpGet("search")]
-    public ActionResult<SearchResults> Search([FromQuery] string q, [FromQuery] int max = 20)
+    public async Task<ActionResult<SearchResults>> Search([FromQuery] string q, [FromQuery] int? max = null)
     {
         try
         {
-            var results = _service.SearchDocuments(q, max);
+            // 混合检索：配置了 embedding 时自动叠加语义相似度；未配置时为纯关键词检索
+            // max 未显式指定时使用当前检索预算档位
+            var maxResults = Math.Clamp(max ?? (_profiles?.Get().MaxResults ?? 20), 1, 100);
+            var queryVector = await TryEmbedQueryAsync(q);
+            var results = _service.SearchDocuments(q, maxResults, _vectors, queryVector);
             return Ok(new SearchResults(q, results));
         }
         catch (Exception ex)
@@ -295,7 +348,7 @@ public sealed class KnowledgeBaseController : ControllerBase
 public sealed record KnowledgeBaseStatus(string Name, string Stage, string Mode);
 public sealed record SetDataDirectoryRequest(string Path);
 public sealed record GetDataDirectoryResponse(string? Path, bool Configured);
-public sealed record AddDocumentRequest(string? Title, string? FileName, byte[] FileContent);
+public sealed record AddDocumentRequest(string? Title, string? FileName, byte[] FileContent, string? Tags = null);
 public sealed record UpdateDocumentRequest(string Title, string? Content, string? Tags = null);
 public sealed record AddMemoryEntryRequest(string Title, string Content, string? Tags = null);
 public sealed record UpdateMemoryEntryRequest(string Title, string Content, string? Tags = null);

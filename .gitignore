@@ -1,6 +1,7 @@
 # Build results
 **/bin/
 **/obj/
+**/publish/
 
 # Test results
 TestResults/
@@ -28,3 +29,22 @@ packages/
 
 # Logs
 *.log
+
+# Local knowledge base data and secrets - never commit
+data/
+documents.json
+memory.json
+vectors.json
+raw_files/
+data_directory.txt
+client_settings.json
+.zcode/config.json
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.pfx
+*.p12
+secrets.json
+appsettings.Local.json

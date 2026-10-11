@@ -29,6 +29,7 @@ public sealed class ShellViewModel : ViewModelBase
         StatusReporter status,
         DocumentsViewModel documents,
         MemoryViewModel memory,
+        ChatViewModel chat,
         SearchViewModel search,
         SettingsViewModel settings)
     {
@@ -40,6 +41,7 @@ public sealed class ShellViewModel : ViewModelBase
         {
             new() { Glyph = "\uE8F1", Title = "资料库", Page = documents },
             new() { Glyph = "\uE70B", Title = "项目记忆", Page = memory },
+            new() { Glyph = "\uE8BD", Title = "问答", Page = chat },
             new() { Glyph = "\uE721", Title = "搜索", Page = search },
             new() { Glyph = "\uE713", Title = "设置", Page = settings }
         };
@@ -61,6 +63,7 @@ public sealed class ShellViewModel : ViewModelBase
                 return;
 
             CurrentPage = value.Page;
+            OnPropertyChanged(nameof(CurrentPage));
             CurrentPage.OnNavigatedTo();
         }
     }
@@ -71,7 +74,7 @@ public sealed class ShellViewModel : ViewModelBase
     /// <summary>状态栏数据源（底部状态栏 + 侧栏 API 卡片共用）。</summary>
     public StatusReporter Status { get; }
 
-    /// <summary>启动时探测一次 API 连接，结果写入状态栏。</summary>
+    /// <summary>启动时探测一次 API 连接，结果写入状态栏，并触发首屏页面加载。</summary>
     public async Task InitializeAsync()
     {
         var status = await _api.GetStatusAsync();
@@ -85,5 +88,8 @@ public sealed class ShellViewModel : ViewModelBase
             Status.SetApiState(false, $"API 未连接 · {_api.BaseUrl}");
             Status.SetStatus("API 未连接，请在“设置”页检查服务地址，或先启动 API 服务。");
         }
+
+        // 默认页在构造时选中，从未走过导航切换；这里补一次首屏数据加载
+        CurrentPage.OnNavigatedTo();
     }
 }

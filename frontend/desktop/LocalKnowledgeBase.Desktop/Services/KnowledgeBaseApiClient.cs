@@ -124,6 +124,33 @@ public sealed class KnowledgeBaseApiClient : IKnowledgeApiClient
             return IsSuccess(response);
         });
 
+    public Task<RetrievalProfileDto?> GetProfileAsync() =>
+        SendAsync(async () =>
+        {
+            var response = await _httpClient.GetAsync("api/ai/profile");
+            return IsSuccess(response)
+                ? await response.Content.ReadFromJsonAsync<RetrievalProfileDto>()
+                : null;
+        });
+
+    public Task<RetrievalProfileDto?> SetProfileAsync(string preset) =>
+        SendAsync(async () =>
+        {
+            var response = await _httpClient.PutAsJsonAsync("api/ai/profile", new { Preset = preset });
+            return IsSuccess(response)
+                ? await response.Content.ReadFromJsonAsync<RetrievalProfileDto>()
+                : null;
+        });
+
+    public Task<List<RelatedDocumentDto>?> GetRelatedAsync(string id, int max = 5) =>
+        SendAsync(async () =>
+        {
+            var response = await _httpClient.GetAsync($"api/ai/related/{id}?max={max}");
+            return IsSuccess(response)
+                ? await response.Content.ReadFromJsonAsync<List<RelatedDocumentDto>>()
+                : null;
+        });
+
     // ---- 文档 ----
 
     public Task<List<Document>?> GetDocumentsAsync() =>

@@ -1,0 +1,171 @@
+<UserControl x:Class="LocalKnowledgeBase.Desktop.Views.ChatPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- DataContext = ChatViewModel（由 App.xaml 的 DataTemplate 关联） -->
+    <UserControl.InputBindings>
+        <KeyBinding Key="Enter" Command="{Binding SendCommand}" />
+    </UserControl.InputBindings>
+
+    <Grid Background="{StaticResource BackgroundBrush}" Margin="34,28,34,0">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- 页头 -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,16">
+            <TextBlock Text="问答" Style="{StaticResource HeadingLarge}" />
+            <TextBlock Text="先检索知识库资料，再由本地大模型生成回答 · 数据全程不出本机"
+                       Margin="0,6,0,0"
+                       Style="{StaticResource BodyText}" />
+        </StackPanel>
+
+        <!-- 对话区 -->
+        <ListBox Grid.Row="1"
+                 x:Name="MessagesList"
+                 ItemsSource="{Binding Messages}"
+                 Background="Transparent"
+                 BorderThickness="0"
+                 SelectionMode="Single"
+                 Focusable="False"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 VerticalContentAlignment="Top">
+            <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="Padding" Value="0" />
+                    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ListBoxItem">
+                                <ContentPresenter />
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </ListBox.ItemContainerStyle>
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <Grid Margin="0,5">
+                        <!-- 用户消息：右侧气泡 -->
+                        <Border MaxWidth="560"
+                                HorizontalAlignment="Right"
+                                CornerRadius="12,12,4,12"
+                                Background="{StaticResource PrimaryBrush}"
+                                Padding="12,8"
+                                Visibility="{Binding IsUser, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="{Binding Text}"
+                                       Foreground="White"
+                                       FontSize="13"
+                                       TextWrapping="Wrap" />
+                        </Border>
+
+                        <!-- 助手消息：左侧气泡 + 引用来源 -->
+                        <StackPanel MaxWidth="660"
+                                    HorizontalAlignment="Left"
+                                    Visibility="{Binding IsUser, Converter={StaticResource InverseBoolToVisibility}}">
+                            <Border CornerRadius="12,12,12,4"
+                                    Background="{StaticResource CardBrush}"
+                                    BorderBrush="{StaticResource BorderColorBrush}"
+                                    BorderThickness="1"
+                                    Padding="12,9">
+                                <TextBlock Text="{Binding Text}"
+                                           Foreground="{StaticResource TextPrimaryBrush}"
+                                           FontSize="13"
+                                           TextWrapping="Wrap" />
+                            </Border>
+                            <ItemsControl ItemsSource="{Binding Sources}" Margin="4,6,0,0">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Margin="0,0,6,4"
+                                                Padding="8,3"
+                                                CornerRadius="10"
+                                                Background="{StaticResource PrimarySoftBrush}"
+                                                ToolTip="本次回答引用的知识库文档">
+                                            <TextBlock Text="{Binding Label}"
+                                                       Foreground="{StaticResource PrimaryDarkBrush}"
+                                                       FontSize="11" />
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Grid>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <!-- 空状态 -->
+        <Border Grid.Row="1"
+                Padding="28,34"
+                CornerRadius="8"
+                BorderBrush="{StaticResource BorderColorBrush}"
+                BorderThickness="1"
+                Background="#FAFBF9"
+                VerticalAlignment="Center"
+                HorizontalAlignment="Center"
+                Visibility="{Binding HasConversation, Converter={StaticResource InverseBoolToVisibility}}">
+            <StackPanel HorizontalAlignment="Center" MaxWidth="420">
+                <TextBlock Text="&#xE8BD;"
+                           HorizontalAlignment="Center"
+                           Foreground="{StaticResource TextTertiaryBrush}"
+                           FontFamily="{StaticResource IconFont}"
+                           FontSize="24" />
+                <TextBlock Text="向知识库提问"
+                           Margin="0,10,0,0"
+                           HorizontalAlignment="Center"
+                           Style="{StaticResource BodyText}" />
+                <TextBlock Text="例如：知识库里有哪些关于架构的约定？"
+                           Margin="0,4,0,0"
+                           HorizontalAlignment="Center"
+                           Style="{StaticResource CaptionText}" />
+            </StackPanel>
+        </Border>
+
+        <!-- 输入区 -->
+        <Border Grid.Row="2"
+                Style="{StaticResource CardBorder}"
+                Margin="0,12,0,24"
+                Padding="14">
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBox Height="42"
+                             VerticalContentAlignment="Center"
+                             ToolTip="输入问题后按 Enter 发送"
+                             Text="{Binding Question, UpdateSourceTrigger=PropertyChanged}"
+                             Style="{StaticResource ModernTextBox}" />
+
+                    <Button Grid.Column="1"
+                            Width="108"
+                            Height="42"
+                            Margin="10,0,0,0"
+                            Style="{StaticResource PrimaryButton}"
+                            AutomationProperties.Name="发送"
+                            Command="{Binding SendCommand}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE724;"
+                                       Margin="0,0,7,0"
+                                       FontFamily="{StaticResource IconFont}"
+                                       FontSize="14" />
+                            <TextBlock Text="发送" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+                <TextBlock Margin="0,8,0,0"
+                           Text="{Binding StatusText}"
+                           Style="{StaticResource CaptionText}" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>
