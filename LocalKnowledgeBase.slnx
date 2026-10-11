@@ -1,0 +1,10 @@
+<Solution>
+  <Project Path="backend/LocalKnowledgeBase.Core/LocalKnowledgeBase.Core.csproj" />
+  <Folder Name="/frontend/" />
+  <Folder Name="/frontend/desktop/">
+    <Project Path="frontend/desktop/LocalKnowledgeBase.Desktop.Tests/LocalKnowledgeBase.Desktop.Tests.csproj" />
+  </Folder>
+  <Project Path="backend/LocalKnowledgeBase.Api/LocalKnowledgeBase.Api.csproj" />
+  <Project Path="frontend/desktop/LocalKnowledgeBase.Desktop/LocalKnowledgeBase.Desktop.csproj" />
+  <Project Path="backend/tests/LocalKnowledgeBase.Core.Tests/LocalKnowledgeBase.Core.Tests.csproj" />
+</Solution>

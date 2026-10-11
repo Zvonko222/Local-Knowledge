@@ -1,0 +1,145 @@
+<UserControl x:Class="LocalKnowledgeBase.Desktop.Views.SearchPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- DataContext = SearchViewModel（由 App.xaml 的 DataTemplate 关联） -->
+    <UserControl.InputBindings>
+        <KeyBinding Key="Enter" Command="{Binding SearchCommand}" />
+    </UserControl.InputBindings>
+    <ScrollViewer x:Name="PageScroll"
+                  Background="{StaticResource BackgroundBrush}"
+                  Padding="0"
+                  HorizontalScrollBarVisibility="Disabled"
+                  HorizontalContentAlignment="Stretch"
+                  VerticalScrollBarVisibility="Auto">
+        <StackPanel Width="{Binding ElementName=PageScroll, Path=ViewportWidth, Converter={StaticResource ResponsivePageWidthConverter}}"
+                    Margin="34,28,34,40"
+                    HorizontalAlignment="Center">
+            <StackPanel Margin="0,0,0,22">
+                <TextBlock Text="搜索" Style="{StaticResource HeadingLarge}" />
+                <TextBlock Text="文档标题、正文和标签"
+                           Margin="0,6,0,0"
+                           Style="{StaticResource BodyText}" />
+            </StackPanel>
+
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,18">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBox Height="42"
+                                 ToolTip="输入关键词后按 Enter"
+                                 Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
+                                 Style="{StaticResource ModernTextBox}" />
+
+                        <Button Grid.Column="1"
+                                Width="108"
+                                Margin="10,0,0,0"
+                                Style="{StaticResource PrimaryButton}"
+                                Command="{Binding SearchCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE721;"
+                                           Margin="0,0,7,0"
+                                           FontFamily="{StaticResource IconFont}"
+                                           FontSize="14" />
+                                <TextBlock Text="搜索" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+
+                    <TextBlock Margin="0,11,0,0"
+                               Text="{Binding StatusText}"
+                               Style="{StaticResource CaptionText}" />
+                </StackPanel>
+            </Border>
+
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding ResultCountText}"
+                           Style="{StaticResource HeadingMedium}" />
+                <TextBlock Grid.Column="1"
+                           Text="正文命中结果"
+                           VerticalAlignment="Center"
+                           Style="{StaticResource CaptionText}" />
+            </Grid>
+
+            <ItemsControl ItemsSource="{Binding Results}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Style="{StaticResource CardBorder}" Margin="0,0,0,10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <Border Width="36"
+                                        Height="36"
+                                        CornerRadius="8"
+                                        Background="{StaticResource PrimarySoftBrush}">
+                                    <TextBlock Text="&#xE8A5;"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"
+                                               Foreground="{StaticResource PrimaryDarkBrush}"
+                                               FontFamily="{StaticResource IconFont}"
+                                               FontSize="16" />
+                                </Border>
+
+                                <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                                    <TextBlock Text="{Binding Title}"
+                                               Foreground="{StaticResource TextPrimaryBrush}"
+                                               FontSize="14"
+                                               FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding Tags}"
+                                               Margin="0,4,0,0"
+                                               Foreground="{StaticResource PrimaryDarkBrush}"
+                                               FontSize="11" />
+                                    <TextBlock Text="{Binding Content}"
+                                               Margin="0,7,0,0"
+                                               MaxHeight="66"
+                                               TextWrapping="Wrap"
+                                               TextTrimming="CharacterEllipsis"
+                                               Style="{StaticResource CaptionText}" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <Border Margin="0,12,0,0"
+                    Padding="28,34"
+                    CornerRadius="8"
+                    BorderBrush="{StaticResource BorderColorBrush}"
+                    BorderThickness="1"
+                    Background="#FAFBF9">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding ShowEmptyState}" Value="True">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <StackPanel HorizontalAlignment="Center">
+                    <TextBlock Text="&#xE721;"
+                               HorizontalAlignment="Center"
+                               Foreground="{StaticResource TextTertiaryBrush}"
+                               FontFamily="{StaticResource IconFont}"
+                               FontSize="22" />
+                    <TextBlock Text="暂无搜索结果"
+                               Margin="0,10,0,0"
+                               HorizontalAlignment="Center"
+                               Style="{StaticResource BodyText}" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

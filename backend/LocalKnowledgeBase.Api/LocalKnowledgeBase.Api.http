@@ -1,0 +1,6 @@
+@LocalKnowledgeBase_Api_HostAddress = http://localhost:5062
+
+GET {{LocalKnowledgeBase_Api_HostAddress}}/api/knowledge-base/status
+Accept: application/json
+
+###

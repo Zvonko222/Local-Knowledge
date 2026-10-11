@@ -1,0 +1,30 @@
+# Build results
+**/bin/
+**/obj/
+
+# Test results
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+# Agent and local scratch
+.commandcode/
+work/
+.legacy-front-end/
+front-end/
+
+# IDE and local user state
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+**/.vs/
+.vscode/
+
+# NuGet
+*.nuget.props
+packages/
+
+# Logs
+*.log

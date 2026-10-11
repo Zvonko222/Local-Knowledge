@@ -1,0 +1,196 @@
+<UserControl x:Class="LocalKnowledgeBase.Desktop.Views.DocumentsPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- DataContext = DocumentsViewModel（由 App.xaml 的 DataTemplate 关联） -->
+    <ScrollViewer x:Name="PageScroll"
+                  Background="{StaticResource BackgroundBrush}"
+                  Padding="0"
+                  HorizontalScrollBarVisibility="Disabled"
+                  HorizontalContentAlignment="Stretch"
+                  VerticalScrollBarVisibility="Auto">
+        <StackPanel Width="{Binding ElementName=PageScroll, Path=ViewportWidth, Converter={StaticResource ResponsivePageWidthConverter}}"
+                    Margin="34,28,34,40"
+                    HorizontalAlignment="Center">
+            <StackPanel Margin="0,0,0,22">
+                <TextBlock Text="资料库" Style="{StaticResource HeadingLarge}" />
+                <TextBlock Text="本地文档与提取内容"
+                           Margin="0,6,0,0"
+                           Style="{StaticResource BodyText}" />
+            </StackPanel>
+
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,14">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Orientation="Horizontal">
+                        <Button Width="120"
+                                Style="{StaticResource PrimaryButton}"
+                                Command="{Binding ImportCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE710;"
+                                           Margin="0,0,7,0"
+                                           FontFamily="{StaticResource IconFont}"
+                                           FontSize="14" />
+                                <TextBlock Text="导入文档" />
+                            </StackPanel>
+                        </Button>
+
+                        <Button Width="100"
+                                Margin="8,0,0,0"
+                                Style="{StaticResource SecondaryButton}"
+                                Command="{Binding LoadCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE72C;"
+                                           Margin="0,0,7,0"
+                                           FontFamily="{StaticResource IconFont}"
+                                           FontSize="14" />
+                                <TextBlock Text="刷新" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+
+                    <TextBlock Grid.Column="1"
+                               MaxWidth="420"
+                               VerticalAlignment="Center"
+                               TextAlignment="Right"
+                               TextTrimming="CharacterEllipsis"
+                               Text="{Binding StatusText}"
+                               Style="{StaticResource CaptionText}" />
+                </Grid>
+            </Border>
+
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Text="文档列表"
+                           VerticalAlignment="Center"
+                           Style="{StaticResource HeadingMedium}" />
+
+                <TextBox Grid.Column="1"
+                         Width="260"
+                         Height="36"
+                         ToolTip="按标题、标签、类型或正文筛选"
+                         Text="{Binding FilterText, UpdateSourceTrigger=PropertyChanged}"
+                         Style="{StaticResource ModernTextBox}" />
+
+                <Button Grid.Column="2"
+                        Width="82"
+                        Height="36"
+                        Margin="8,0,0,0"
+                        Content="清空"
+                        Style="{StaticResource SecondaryButton}"
+                        Command="{Binding ClearFilterCommand}" />
+            </Grid>
+
+            <DataGrid Height="340"
+                      Margin="0,0,0,14"
+                      Style="{StaticResource ModernDataGrid}"
+                      ItemsSource="{Binding Documents}"
+                      SelectedItem="{Binding SelectedDocument}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="标题" Binding="{Binding Title}" Width="*" />
+                    <DataGridTextColumn Header="标签" Binding="{Binding Tags}" Width="145" />
+                    <DataGridTextColumn Header="类型" Binding="{Binding FileType}" Width="74" />
+                    <DataGridTextColumn Header="大小" Binding="{Binding FileSize, Converter={StaticResource FileSizeConverter}}" Width="92" />
+                    <DataGridTextColumn Header="更新时间" Binding="{Binding UpdatedAt, StringFormat=g}" Width="145" />
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <Border Style="{StaticResource CardBorder}"
+                    Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel>
+                            <TextBlock Text="文档详情" Style="{StaticResource HeadingMedium}" />
+                            <TextBlock Text="{Binding DetailMeta}"
+                                       Margin="0,4,0,0"
+                                       Style="{StaticResource CaptionText}" />
+                        </StackPanel>
+
+                        <Border Grid.Column="1"
+                                Padding="9,5"
+                                CornerRadius="12"
+                                Background="{StaticResource PrimarySoftBrush}">
+                            <TextBlock Text="可编辑"
+                                       Foreground="{StaticResource PrimaryDarkBrush}"
+                                       FontSize="11"
+                                       FontWeight="SemiBold" />
+                        </Border>
+                    </Grid>
+
+                    <Grid Margin="0,18,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                            <TextBlock Text="标题" Style="{StaticResource HeadingSmall}" />
+                            <TextBox Margin="0,5,0,0"
+                                     Text="{Binding DetailTitle, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource ModernTextBox}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                            <TextBlock Text="标签" Style="{StaticResource HeadingSmall}" />
+                            <TextBox Margin="0,5,0,0"
+                                     ToolTip="使用逗号分隔多个标签"
+                                     Text="{Binding DetailTags, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource ModernTextBox}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <TextBlock Text="内容"
+                               Margin="0,14,0,0"
+                               Style="{StaticResource HeadingSmall}" />
+                    <TextBox Height="210"
+                             Margin="0,5,0,0"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             Text="{Binding DetailContent, UpdateSourceTrigger=PropertyChanged}"
+                             Style="{StaticResource ModernTextBox}" />
+
+                    <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                        <Button Width="116"
+                                Style="{StaticResource PrimaryButton}"
+                                Command="{Binding SaveCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE74E;"
+                                           Margin="0,0,7,0"
+                                           FontFamily="{StaticResource IconFont}"
+                                           FontSize="14" />
+                                <TextBlock Text="保存更改" />
+                            </StackPanel>
+                        </Button>
+
+                        <Button Width="106"
+                                Margin="8,0,0,0"
+                                Style="{StaticResource DangerButton}"
+                                Command="{Binding DeleteCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE74D;"
+                                           Margin="0,0,7,0"
+                                           FontFamily="{StaticResource IconFont}"
+                                           FontSize="14" />
+                                <TextBlock Text="删除" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
