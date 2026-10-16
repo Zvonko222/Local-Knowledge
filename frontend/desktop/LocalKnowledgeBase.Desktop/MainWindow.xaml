@@ -70,7 +70,7 @@
                 </Grid>
 
                 <StackPanel Grid.Row="1">
-                    <TextBlock Text="工作区"
+                    <TextBlock Text="{DynamicResource Str_Sidebar_Workspace}"
                                Margin="12,0,0,8"
                                Foreground="#70807B"
                                FontSize="11"
@@ -102,7 +102,7 @@
                         BorderBrush="#2B3A36"
                         BorderThickness="1">
                     <StackPanel>
-                        <TextBlock Text="本地优先"
+                        <TextBlock Text="{DynamicResource Str_Sidebar_LocalFirst}"
                                    Foreground="#E8EFEC"
                                    FontSize="12"
                                    FontWeight="SemiBold" />

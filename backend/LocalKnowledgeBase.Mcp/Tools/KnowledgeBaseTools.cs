@@ -150,13 +150,21 @@ public sealed class KnowledgeBaseTools(KnowledgeBaseApiClient api)
         if (context.TotalHits == 0)
             return Json.Serialize(new { 提示 = $"知识库中没有找到与「{query}」相关的资料。", 命中数 = 0 });
 
-        var sources = context.Sources.Select(s => new { 序号 = s.Index, 标题 = s.Title, 文档编号 = s.DocumentId });
+        var sources = context.Sources.Select(s => new
+        {
+            序号 = s.Index,
+            类型 = s.SourceType == "memory" ? "项目记忆" : "文档",
+            标题 = s.Title,
+            文档编号 = s.SourceType == "document" ? s.DocumentId : null,
+            记忆编号 = s.SourceType == "memory" ? s.MemoryEntryId : null
+        });
         return Json.Serialize(new
         {
             提示 = "以下上下文可直接拼进大模型提示词使用。",
             命中数 = context.TotalHits,
             已装入条数 = context.IncludedCount,
             因预算舍弃 = context.Truncated,
+            语义检索 = context.SemanticUsed ? "已启用（结果含语义排序）" : "未启用（仅关键词匹配）",
             上下文 = context.Context,
             来源 = sources
         });
@@ -225,13 +233,15 @@ public sealed class KnowledgeBaseTools(KnowledgeBaseApiClient api)
     }
 
     [McpServerTool(Name = "kb_search_memory")]
-    [Description("在项目记忆（用户的长期上下文：决策、偏好、约定等）中检索条目。")]
-    public string SearchMemory([Description("搜索关键词")] string query)
+    [Description("在项目记忆（用户的长期上下文：决策、偏好、约定等）中检索条目（配置 embedding 时自动叠加语义相似度）。")]
+    public string SearchMemory(
+        [Description("搜索关键词或整句提问")] string query,
+        [Description("最多返回条数，1-50；留空使用当前预算档位")] int? max = null)
     {
         if (string.IsNullOrWhiteSpace(query))
             return Error("搜索关键词不能为空。");
 
-        var entries = api.SearchMemoryEntriesAsync(query.Trim()).GetAwaiter().GetResult();
+        var entries = api.SearchMemoryEntriesAsync(query.Trim(), max).GetAwaiter().GetResult();
         if (entries is null)
             return Error(api.LastError);
 

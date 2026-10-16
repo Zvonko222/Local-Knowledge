@@ -22,7 +22,7 @@
 环境要求：Windows 10+、.NET 10 SDK。
 
 ```powershell
-# 1) 构建并跑测试（应当全部通过：后端 5 个 + 桌面 11 个用例）
+# 1) 构建并运行当前解决方案测试
 cd C:\path\to\RAG
 .\scripts\build.ps1 -Configuration Debug
 .\scripts\test.ps1  -Configuration Debug
@@ -111,7 +111,7 @@ cd C:\path\to\RAG
 
 ### 5.2 行为与数据说明
 
-- 检索在本机完成（关键词打分排序，取前 6 条、每条截取 800 字）。
+- 检索在本机完成（关键词打分 + 可选分块向量语义排序，分块按段落与句末边界切分）；文档与项目记忆共同参与，默认按当前档位限制条数与总字符预算。
 - **语义检索（可选增强）**：给 API 配置 embedding 模型后，检索自动叠加语义相似度——
   换了说法（同义词、意近文远）也能命中。启动 API 前设置环境变量：
 
@@ -120,9 +120,9 @@ cd C:\path\to\RAG
   .\scripts\start-api.ps1                                  # 地址与密钥复用本节的模型配置
   ```
 
-  然后对已有文档重建一次索引，之后导入/编辑/删除都会自动维护：
-  `curl -sk -X POST https://localhost:7047/api/ai/index/rebuild`
-  未配置 embedding 时一切照旧（纯关键词检索），随时可加。
+  然后对已有文档和记忆重建一次索引；之后文档/记忆新增和编辑会后台分块索引，删除会清理对应向量：
+  `curl.exe -sk -X POST https://localhost:7047/api/ai/index/rebuild`
+  未配置 embedding 时一切照旧（纯关键词检索），随时可加。模型切换后必须重建；重建前建议备份数据目录。
 - 生成阶段会把检索到的**资料片段**与你**的问题**发送给你配置的模型服务商——
   使用云端 API 时请知悉这一点；知识库的存储与检索始终只在本机。
 - 没有命中资料时直接提示"未找到相关资料"，不会调用模型。
@@ -156,7 +156,7 @@ cd C:\path\to\RAG
 **② 新会话提问时——AI 自动调用**
 
 任何新会话（包括另一个 AI）遇到相关问题，会按 SKILL.md 规范先检索知识库再回答：
-记忆、文档、会话存本统一参与检索与打分，回答带 [n] 引用。
+记忆、文档、会话存本统一参与混合检索与分块向量排序；无 Embedding 配置时退化为关键词排序。引用来源带 [n] 编号，并标记项目记忆类型。
 
 **省 token 的机制**（默认已启用）：
 
@@ -174,7 +174,7 @@ cd C:\path\to\RAG
 
 MCP（Model Context Protocol）是 AI 客户端连接外部工具的标准协议。
 本仓库自带一个 **stdio MCP 服务器**：AI 客户端会把它作为子进程启动，
-AI 就能通过 8 个工具直接使用你的知识库。
+AI 就能通过 12 个工具直接使用你的知识库。
 
 ### 前提
 
@@ -286,7 +286,7 @@ MCP 让 AI **能**调用知识库；SKILL.md 让 AI **懂得按规矩**调用—
 | `kb_list_documents` | 列出全部文档 |
 | `kb_get_document` | 读取一篇文档的完整正文 |
 | `kb_add_document` | 把 AI 整理的内容保存为新文档入库（保存后立即可检索） |
-| `kb_search_memory` | 检索项目记忆 |
+| `kb_search_memory` | 检索项目记忆（关键词 + 可选语义） |
 | `kb_list_memory` | 列出全部记忆 |
 | `kb_get_memory` | 读取一条记忆 |
 | `kb_save_memory` | 新建/更新一条记忆（AI 可写入） |
@@ -303,29 +303,33 @@ AI 专用接口（`api/ai`），把知识库变成标准的"检索/问答服务"
 
 | 端点 | 用途 |
 | --- | --- |
-| `GET /api/ai/status` | 探测服务与模型配置状态 |
-| `POST /api/ai/context` | 检索知识库，返回**可直接拼进提示词**的上下文（带 [n] 编号引用） |
-| `POST /api/ai/answer` | 一步到位：检索 + 本地模型生成带引用回答 |
+| `GET /api/ai/status` | 探测服务与聊天模型配置状态 |
+| `GET /api/ai/index/status` | 查看 Embedding 配置、待处理条数、已索引文档/记忆数与最近错误 |
+| `POST /api/ai/index/rebuild` | 重建全部文档与记忆向量；模型切换后必须执行 |
+| `POST /api/ai/context` | 混合检索文档与记忆，返回带 [n] 引用及来源类型的上下文，不调用聊天模型 |
+| `POST /api/ai/answer` | 检索 + 配置的 OpenAI 兼容聊天模型生成带引用回答 |
 
-`/ai/answer` 需要先给 API 配本地模型（启动前设置环境变量）：
+检索请求可传 `query`、`max`、`snippetLength`、`maxTotalChars`；各数值范围和默认档位见 README。`max` 是文档与记忆合计条数。记忆来源的 `sourceType` 为 `memory`，ID 位于 `memoryEntryId`；文档来源继续使用 `documentId`。
+
+`/ai/answer` 需要先给 API 配聊天模型（启动前设置环境变量）：
 
 ```powershell
-$env:LOCAL_KNOWLEDGE_BASE_LLM_URL  = "http://localhost:11434/v1"
+$env:LOCAL_KNOWLEDGE_BASE_LLM_URL = "http://localhost:11434/v1"
 $env:LOCAL_KNOWLEDGE_BASE_LLM_MODEL = "qwen2.5:7b"
-.\scripts
-un-api.ps1
+.\scripts\run-api.ps1
 ```
 
 curl 示例：
 
 ```powershell
-# 拿上下文（自己拼提示词，适合任何工具）
-curl -sk -X POST https://localhost:7047/api/ai/context -H "Content-Type: application/json" ^
-  -d '{"query":"数据保存在哪里","max":3}'
+# 先检查异步索引队列是否清空、文档和记忆是否已索引
+curl.exe -sk https://localhost:7047/api/ai/index/status
 
-# 拿最终回答
-curl -sk -X POST https://localhost:7047/api/ai/answer -H "Content-Type: application/json" ^
-  -d '{"query":"数据保存在哪里"}'
+# 取得上下文（两类来源合计最多 3 条，总预算 2000 字符）
+curl.exe -sk -X POST https://localhost:7047/api/ai/context -H "Content-Type: application/json" -d '{"query":"数据保存在哪里","max":3,"maxTotalChars":2000}'
+
+# 取得最终回答
+curl.exe -sk -X POST https://localhost:7047/api/ai/answer -H "Content-Type: application/json" -d '{"query":"数据保存在哪里"}'
 ```
 
 与 MCP 的关系：MCP（第 6 节）适合桌面 AI 客户端；HTTP 接口适合工作流平台和
@@ -339,20 +343,31 @@ curl -sk -X POST https://localhost:7047/api/ai/answer -H "Content-Type: applicat
 <数据目录>/
 ├── documents.json      # 文档元数据与提取的正文
 ├── memory.json         # 项目记忆
+├── vectors.json        # 文档/记忆的分块向量与命中块文本
 └── raw_files/          # 导入的原始文件
 ```
 
 - 当前数据目录可在桌面端"设置"页查看，或问 AI 调 `kb_status`。
-- **备份**：把整个数据目录复制一份即可；换电脑也是整目录拷贝。
+- **备份**：停止 API 后复制整个数据目录，确保 `documents.json`、`memory.json`、`vectors.json` 和 `raw_files/` 来自同一时点；换电脑也是整目录拷贝。恢复后如切换了 Embedding 模型，执行索引重建。
 - 数据目录可在桌面端"设置"页随时更换，立即生效。
+- `vectors.json` 是可重建索引，不是原始资料备份；原始资料以文档/记忆 JSON 与 `raw_files/` 为准。
 
 ---
 
 ## 10. 常见问题
 
 **AI 调工具报"无法连接本地 API"**
-API 没启动。运行 `.\scripts\run-api.ps1`，确认浏览器能打开
+API 没启动。在仓库根目录运行 `.\scripts\run-api.ps1`，确认浏览器能打开
 `http://localhost:5062/api/knowledge-base/status`。
+
+**关键词能命中但语义检索没有效果**
+调用 `GET /api/ai/index/status`。确认 `embeddingConfigured=true`、`pending=0`、`lastError` 为空且已索引计数符合预期；检查 embedding 服务 URL、模型名和密钥。切换模型后调用 `POST /api/ai/index/rebuild`，并检查响应中的 `failed`。embedding 不可用时检索仍按关键词执行。
+
+**问答返回 503 或 502**
+503 表示聊天模型 URL/模型名未配置；502 表示已配置但模型服务请求失败。检查 `LOCAL_KNOWLEDGE_BASE_LLM_URL`、`LOCAL_KNOWLEDGE_BASE_LLM_MODEL`、密钥及模型服务可达性。Embedding 与聊天模型共用 URL/密钥但模型名分别配置。
+
+**生产或局域网部署**
+当前 API 没有内建身份认证，默认面向本机可信进程。不要直接把 API 端口暴露到公网或不可信局域网；远程访问必须在受信任的认证/TLS 反向代理后，并配置来源访问限制。使用云端聊天/Embedding 服务时，问题和检索内容会发送到对应服务商。
 
 **API 启动报端口占用**
 另起端口：编辑 `backend/LocalKnowledgeBase.Api/Properties/launchSettings.json`，

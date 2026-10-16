@@ -230,7 +230,7 @@ public sealed class MemoryAndExportTests
     {
         var api = new FakeKnowledgeApiClient();
         var dialogs = new FakeDialogService();
-        var viewModel = new DocumentsViewModel(api, dialogs, new StatusReporter());
+        var viewModel = new DocumentsViewModel(api, dialogs, new StatusReporter(), new Localization());
         viewModel.SelectedDocument = new Document { Id = "d1", Title = "架构:笔记", Content = "正文内容" };
         var exportPath = Path.Combine(Path.GetTempPath(), $"lkb-export-{Guid.NewGuid():N}.md");
         dialogs.NextSavePath = exportPath;
@@ -252,7 +252,7 @@ public sealed class MemoryAndExportTests
         await api.AddDocumentAsync("架构笔记", "a.md", [1]);
         await api.AddDocumentAsync("会议记录", "b.md", [2]);
         var dialogs = new FakeDialogService();
-        var viewModel = new DocumentsViewModel(api, dialogs, new StatusReporter());
+        var viewModel = new DocumentsViewModel(api, dialogs, new StatusReporter(), new Localization());
         var exportDir = Path.Combine(Path.GetTempPath(), $"lkb-export-all-{Guid.NewGuid():N}");
         dialogs.NextFolder = exportDir;
 
@@ -277,7 +277,7 @@ public sealed class MemoryAndExportTests
         api.NextDataDirectory = new GetDataDirectoryResponse { Path = dataDir, Configured = true };
 
         var dialogs = new FakeDialogService();
-        var viewModel = new SettingsViewModel(api, new FakeLlmClient(), dialogs, new StatusReporter());
+        var viewModel = new SettingsViewModel(api, new FakeLlmClient(), dialogs, new StatusReporter(), new Localization());
         await viewModel.RefreshAsync();
 
         var zipPath = Path.Combine(Path.GetTempPath(), $"lkb-backup-{Guid.NewGuid():N}.zip");
@@ -292,13 +292,13 @@ public sealed class MemoryAndExportTests
     }
 
     [Fact]
-    public void ApplyProfile_SwitchesPresetViaApi()
+    public async Task ApplyProfileAsync_SwitchesPresetViaApi()
     {
         var api = new FakeKnowledgeApiClient();
-        var viewModel = new SettingsViewModel(api, new FakeLlmClient(), new FakeDialogService(), new StatusReporter());
+        var viewModel = new SettingsViewModel(api, new FakeLlmClient(), new FakeDialogService(), new StatusReporter(), new Localization());
 
         viewModel.ProfileLabel = SettingsViewModel.ProfileLightLabel;
-        viewModel.ApplyProfile();
+        await viewModel.ApplyProfileAsync();
 
         Assert.Equal("light", api.CurrentProfile);
         Assert.Contains("已切换", viewModel.ProfileStatusText);
@@ -306,11 +306,23 @@ public sealed class MemoryAndExportTests
     }
 
     [Fact]
+    public void SelectingProvider_AutoFillsDeepSeekDefaults()
+    {
+        var viewModel = new SettingsViewModel(new FakeKnowledgeApiClient(), new FakeLlmClient(),
+            new FakeDialogService(), new StatusReporter(), new Localization());
+
+        viewModel.SelectedProvider = "DeepSeek";
+
+        Assert.Equal("https://api.deepseek.com/v1", viewModel.LlmBaseUrl);
+        Assert.Equal("deepseek-chat", viewModel.LlmModel);
+    }
+
+    [Fact]
     public async Task ExportAll_WithEmptyKnowledgeBase_DoesNotAskForFolder()
     {
         var api = new FakeKnowledgeApiClient();
         var dialogs = new FakeDialogService();
-        var viewModel = new DocumentsViewModel(api, dialogs, new StatusReporter());
+        var viewModel = new DocumentsViewModel(api, dialogs, new StatusReporter(), new Localization());
 
         await viewModel.ExportAllAsync();
 

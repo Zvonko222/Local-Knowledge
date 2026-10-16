@@ -1,3 +1,4 @@
+using LocalKnowledgeBase.Core;
 using LocalKnowledgeBase.Core.Services;
 using LocalKnowledgeBase.Api.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -18,16 +19,18 @@ public sealed class AiController : ControllerBase
     private readonly VectorIndexService? _vectors;
     private readonly EmbeddingClient? _embedder;
     private readonly RetrievalProfileService? _profiles;
+    private readonly Services.DocumentIndexingService? _indexing;
 
     public AiController(KnowledgeBaseService service, LocalLlmClient? llm = null,
         VectorIndexService? vectors = null, EmbeddingClient? embedder = null,
-        RetrievalProfileService? profiles = null)
+        RetrievalProfileService? profiles = null, Services.DocumentIndexingService? indexing = null)
     {
         _service = service;
         _llm = llm;
         _vectors = vectors;
         _embedder = embedder;
         _profiles = profiles;
+        _indexing = indexing;
     }
 
     /// <summary>当前检索预算档位与可选预设（含各档 token 比重）。</summary>
@@ -54,6 +57,27 @@ public sealed class AiController : ControllerBase
         });
     }
 
+    /// <summary>向量索引状态：模型、待处理队列、已索引数量、块数与最近错误。</summary>
+    [HttpGet("index/status")]
+    public ActionResult<object> GetIndexStatus()
+    {
+        var documents = _service.ListDocuments();
+        var memories = _service.ListMemoryEntries();
+        return Ok(new
+        {
+            embeddingConfigured = _embedder is not null,
+            model = _embedder?.Model,
+            pending = _indexing?.PendingCount ?? 0,
+            indexed = _vectors?.Count ?? 0,
+            indexedDocuments = _vectors is null ? 0 : documents.Count(document => _vectors.Get(document.Id) is not null),
+            indexedMemories = _vectors is null ? 0 : memories.Count(memory => _vectors.Get(VectorIndexService.MemoryIndexKey(memory.Id)) is not null),
+            chunks = _vectors is null ? 0
+                : documents.Sum(document => _vectors.GetChunks(document.Id).Count)
+                  + memories.Sum(memory => _vectors.GetChunks(VectorIndexService.MemoryIndexKey(memory.Id)).Count),
+            lastError = _indexing?.LastError
+        });
+    }
+
     /// <summary>切换检索预算档位（light / standard / deep）。</summary>
     [HttpPut("profile")]
     public ActionResult<object> SetProfile([FromBody] ProfileRequest request)
@@ -73,7 +97,7 @@ public sealed class AiController : ControllerBase
     }
 
     /// <summary>混合检索的查询向量（embedding 未配置/索引为空/模型不一致时返回 null）。</summary>
-    private async Task<float[]?> TryEmbedQueryAsync(string query)
+    private async Task<float[]?> TryEmbedQueryAsync(string query, CancellationToken cancellationToken)
     {
         if (_embedder is null || _vectors is null || _vectors.Count == 0)
             return null;
@@ -81,12 +105,53 @@ public sealed class AiController : ControllerBase
             return null;
         try
         {
-            return await _embedder.EmbedAsync(query);
+            return await _embedder.EmbedAsync(query, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
             return null;
         }
+    }
+
+    private static List<AiContextItem> MergeContextItems(IReadOnlyList<Document> documents,
+        IReadOnlyList<MemoryEntry> memories, int max)
+    {
+        var items = new List<AiContextItem>(max);
+        for (var index = 0; items.Count < max && (index < documents.Count || index < memories.Count); index++)
+        {
+            if (index < documents.Count)
+            {
+                var document = documents[index];
+                items.Add(new AiContextItem("document", document.Id, document.Title, document.Content));
+            }
+            if (items.Count < max && index < memories.Count)
+            {
+                var memory = memories[index];
+                items.Add(new AiContextItem("memory", memory.Id, memory.Title, memory.Content));
+            }
+        }
+        return items;
+    }
+
+    private IReadOnlyDictionary<string, string>? BuildSemanticSnippets(IReadOnlyList<Document> documents,
+        IReadOnlyList<MemoryEntry> memories, float[]? queryVector)
+    {
+        if (queryVector is not { Length: > 0 } || _vectors is null)
+            return null;
+
+        var snippets = new Dictionary<string, string>();
+        foreach (var (id, key) in documents.Select(document => (document.Id, document.Id))
+                     .Concat(memories.Select(memory => (memory.Id, VectorIndexService.MemoryIndexKey(memory.Id)))))
+        {
+            var match = _vectors.GetMostSimilarChunk(key, queryVector);
+            if (match is { Similarity: > 0 } && !string.IsNullOrWhiteSpace(match.Value.Chunk.Text))
+                snippets[key] = match.Value.Chunk.Text;
+        }
+        return snippets;
     }
 
     /// <summary>服务状态：AI 接入前可先探测（模型是否已配置、数据目录位置）。</summary>
@@ -107,18 +172,21 @@ public sealed class AiController : ControllerBase
     /// 适合“自己拿着上下文去调任意模型”的工具。
     /// </summary>
     [HttpPost("context")]
-    public async Task<ActionResult<AiContextResponse>> GetContext([FromBody] AiContextRequest request)
+    public async Task<ActionResult<AiContextResponse>> GetContext([FromBody] AiContextRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Query))
             return BadRequest(new { error = "Query is required" });
 
         var profile = _profiles?.Get() ?? RetrievalProfile.Standard;
-        var queryVector = await TryEmbedQueryAsync(request.Query);
-        var documents = _service.SearchDocuments(request.Query,
-            Math.Clamp(request.Max ?? profile.MaxResults, 1, 50), _vectors, queryVector);
-        var context = AiContextBuilder.Build(request.Query, documents,
+        var max = Math.Clamp(request.Max ?? profile.MaxResults, 1, 50);
+        var queryVector = await TryEmbedQueryAsync(request.Query, cancellationToken);
+        var documents = _service.SearchDocuments(request.Query, max, _vectors, queryVector);
+        var memories = _service.SearchMemoryEntries(request.Query, max, _vectors, queryVector);
+        var items = MergeContextItems(documents, memories, max);
+        var context = AiContextBuilder.Build(request.Query, items,
             Math.Clamp(request.SnippetLength ?? profile.SnippetLength, 50, 5000),
-            Math.Clamp(request.MaxTotalChars ?? profile.MaxTotalChars, 200, 50000));
+            Math.Clamp(request.MaxTotalChars ?? profile.MaxTotalChars, 200, 50000),
+            BuildSemanticSnippets(documents, memories, queryVector));
 
         return Ok(new AiContextResponse(
             context.Query,
@@ -127,8 +195,9 @@ public sealed class AiController : ControllerBase
             context.Truncated,
             context.ContextText,
             context.Sources
-                .Select(s => new AiSourceDto(s.Index, s.Title, s.DocumentId))
-                .ToList()));
+                .Select(s => new AiSourceDto(s.Index, s.Title, s.DocumentId, s.SourceType, s.MemoryEntryId))
+                .ToList(),
+            queryVector is { Length: > 0 }));
     }
 
     /// <summary>
@@ -150,21 +219,30 @@ public sealed class AiController : ControllerBase
             });
 
         var profile = _profiles?.Get() ?? RetrievalProfile.Standard;
-        var queryVector = await TryEmbedQueryAsync(request.Query);
-        var documents = _service.SearchDocuments(request.Query,
-            Math.Clamp(request.Max, 1, 50), _vectors, queryVector);
-        if (documents.Count == 0)
+        var max = Math.Clamp(request.Max ?? profile.MaxResults, 1, 50);
+        var queryVector = await TryEmbedQueryAsync(request.Query, cancellationToken);
+        var documents = _service.SearchDocuments(request.Query, max, _vectors, queryVector);
+        var memories = _service.SearchMemoryEntries(request.Query, max, _vectors, queryVector);
+        var items = MergeContextItems(documents, memories, max);
+        if (items.Count == 0)
             return Ok(new AiAnswerResponse(
                 $"知识库中没有找到与「{request.Query}」相关的资料。",
-                new List<AiSourceDto>(), _llm.Model));
+                new List<AiSourceDto>(), _llm.Model, queryVector is { Length: > 0 }));
 
-        var context = AiContextBuilder.Build(request.Query, documents, AiContextBuilder.DefaultSnippetLength, 4000);
+        var context = AiContextBuilder.Build(request.Query, items,
+            Math.Clamp(request.SnippetLength ?? profile.SnippetLength, 50, 5000),
+            Math.Clamp(request.MaxTotalChars ?? profile.MaxTotalChars, 200, 50000),
+            BuildSemanticSnippets(documents, memories, queryVector));
         var userPrompt = context.ContextText + "\n\n问题：" + request.Query;
 
         string answer;
         try
         {
             answer = await _llm.CompleteAsync(AiContextBuilder.SystemPrompt, userPrompt, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -174,9 +252,10 @@ public sealed class AiController : ControllerBase
         return Ok(new AiAnswerResponse(
             answer.Trim(),
             context.Sources
-                .Select(s => new AiSourceDto(s.Index, s.Title, s.DocumentId))
+                .Select(s => new AiSourceDto(s.Index, s.Title, s.DocumentId, s.SourceType, s.MemoryEntryId))
                 .ToList(),
-            _llm.Model));
+            _llm.Model,
+            queryVector is { Length: > 0 }));
     }
     /// <summary>
     /// 与指定文档语义最相关的其他文档（基于向量索引，按相似度降序）。
@@ -220,18 +299,38 @@ public sealed class AiController : ControllerBase
             });
 
         var documents = _service.ListDocuments();
-        var indexed = 0;
-        foreach (var document in documents)
+        var memories = _service.ListMemoryEntries();
+        var indexedDocuments = 0;
+        var indexedMemories = 0;
+        var failed = 0;
+        foreach (var (id, title, content, isMemory) in documents
+                     .Select(document => (document.Id, document.Title, document.Content, false))
+                     .Concat(memories.Select(memory => (memory.Id, memory.Title, memory.Content, true))))
         {
-            if (string.IsNullOrEmpty(document.Content))
+            var indexId = isMemory ? VectorIndexService.MemoryIndexKey(id) : id;
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                _vectors.Remove(indexId);
+                failed++;
                 continue;
+            }
             try
             {
-                var vector = await _embedder.EmbedAsync(document.Title + "\n" + document.Content, cancellationToken);
-                if (vector is { Length: > 0 })
+                var chunks = KnowledgeBaseService.ChunkTextOnBoundaries(title + "\n" + content);
+                var vectors = await _embedder.EmbedBatchedAsync(chunks, cancellationToken: cancellationToken);
+                if (vectors is { Count: > 0 } && vectors.Count == chunks.Count)
                 {
-                    _vectors.Set(document.Id, _embedder.Model, vector);
-                    indexed++;
+                    _vectors.SetChunks(indexId, _embedder.Model, chunks.Select((text, index) =>
+                        new VectorChunk { Index = index, Text = text, Vector = vectors[index] }).ToList());
+                    if (isMemory)
+                        indexedMemories++;
+                    else
+                        indexedDocuments++;
+                }
+                else
+                {
+                    _vectors.Remove(indexId);
+                    failed++;
                 }
             }
             catch (OperationCanceledException)
@@ -240,19 +339,32 @@ public sealed class AiController : ControllerBase
             }
             catch
             {
-                // 单篇失败跳过，继续其余文档
+                _vectors.Remove(indexId);
+                failed++;
             }
         }
-        _vectors.RemoveExcept(documents.Select(d => d.Id));
 
-        return Ok(new { indexed, total = documents.Count, model = _embedder.Model });
+        var validIds = documents.Select(document => document.Id)
+            .Concat(memories.Select(memory => VectorIndexService.MemoryIndexKey(memory.Id)));
+        _vectors.RemoveExcept(validIds);
+
+        return Ok(new
+        {
+            indexed = indexedDocuments + indexedMemories,
+            indexedDocuments,
+            indexedMemories,
+            failed,
+            total = documents.Count + memories.Count,
+            chunks = validIds.Sum(id => _vectors.GetChunks(id).Count),
+            model = _embedder.Model
+        });
     }
 }
 
 // DTOs
 public sealed record AiContextRequest(string Query, int? Max = null, int? SnippetLength = null, int? MaxTotalChars = null);
 public sealed record ProfileRequest(string Preset);
-public sealed record AiAnswerRequest(string Query, int Max = 6);
-public sealed record AiSourceDto(int Index, string Title, string DocumentId);
-public sealed record AiContextResponse(string Query, int TotalHits, int IncludedCount, bool Truncated, string Context, List<AiSourceDto> Sources);
-public sealed record AiAnswerResponse(string Answer, List<AiSourceDto> Sources, string Model);
+public sealed record AiAnswerRequest(string Query, int? Max = null, int? SnippetLength = null, int? MaxTotalChars = null);
+public sealed record AiSourceDto(int Index, string Title, string DocumentId, string SourceType = "document", string? MemoryEntryId = null);
+public sealed record AiContextResponse(string Query, int TotalHits, int IncludedCount, bool Truncated, string Context, List<AiSourceDto> Sources, bool SemanticUsed = false);
+public sealed record AiAnswerResponse(string Answer, List<AiSourceDto> Sources, string Model, bool SemanticUsed = false);

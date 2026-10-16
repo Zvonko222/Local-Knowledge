@@ -7,7 +7,10 @@
     <!-- 注意：不设置 StartupUri，主窗口由 App.xaml.cs 通过容器创建并注入 ShellViewModel。 -->
     <Application.Resources>
         <ResourceDictionary>
+            <!-- 合并顺序：调色板（背景主题）→ 样式 → 界面语言字符串。
+                 调色板与语言在 App.xaml.cs 按用户设置启动时替换。 -->
             <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/Palette.Default.xaml" />
                 <ResourceDictionary Source="Themes/ModernDesign.xaml" />
             </ResourceDictionary.MergedDictionaries>
 

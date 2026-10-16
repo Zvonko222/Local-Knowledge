@@ -1,5 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
+using LocalKnowledgeBase.Api.Services;
 using LocalKnowledgeBase.Core;
 using LocalKnowledgeBase.Core.Services;
 
@@ -39,6 +41,39 @@ public sealed class VectorIndexServiceTests
     }
 
     [Fact]
+    public void SetChunks_ReplacesChunksAndPersistsLegacyVectors()
+    {
+        var directory = CreateTempDir();
+        var service = new VectorIndexService(directory);
+        service.SetChunks("chunked", "m", [new VectorChunk { Index = 0, Text = "old", Vector = [1f, 0f] }]);
+        service.SetChunks("chunked", "m", [
+            new VectorChunk { Index = 0, Text = "first", Vector = [0f, 1f] },
+            new VectorChunk { Index = 1, Text = "second", Vector = [1f, 0f] }
+        ]);
+        service.Set("legacy", "m", [1f, 0f]);
+
+        var reloaded = new VectorIndexService(directory);
+
+        Assert.Equal(2, reloaded.Count);
+        Assert.Equal(3, reloaded.GetChunks("chunked").Count + reloaded.GetChunks("legacy").Count);
+        Assert.Equal("first", reloaded.GetChunks("chunked")[0].Text);
+        Assert.Equal(new[] { 1f, 0f }, reloaded.GetChunks("legacy")[0].Vector);
+    }
+
+    [Fact]
+    public void LoadsLegacySingleVectorIndexFile()
+    {
+        var directory = CreateTempDir();
+        File.WriteAllText(Path.Combine(directory, "vectors.json"),
+            """{"legacy":{"Model":"m","Vector":[1,0]}}""");
+
+        var service = new VectorIndexService(directory);
+
+        Assert.Equal("m", service.StoredModel);
+        Assert.Equal(new[] { 1f, 0f }, service.GetChunks("legacy")[0].Vector);
+    }
+
+    [Fact]
     public void RemoveExcept_CleansOrphanVectors()
     {
         var service = new VectorIndexService(CreateTempDir());
@@ -68,6 +103,9 @@ public sealed class VectorIndexServiceTests
         service.Set("B", "m", [0.9f, 0.1f]);  // 与 A 高度相似
         service.Set("C", "m", [0f, 1f]);      // 正交
         service.Set("D", "m", [1f, 0f, 0f]);  // 维度不一致（换模型遗留）应被排除
+        service.SetChunks(VectorIndexService.MemoryIndexKey("M1"), "m", [
+            new VectorChunk { Vector = [1f, 0f] }
+        ]);
 
         var related = service.FindMostSimilar("A", 5);
 
@@ -130,6 +168,41 @@ public sealed class HybridSearchTests
     }
 
     [Fact]
+    public void Search_UsesBestChunkSimilarityAndReturnsDocumentOnce()
+    {
+        var service = CreateService();
+        var index = new VectorIndexService(service.DataDirectory);
+        index.SetChunks("B", "m", [
+            new VectorChunk { Index = 0, Text = "irrelevant", Vector = [0f, 1f] },
+            new VectorChunk { Index = 1, Text = "semantic match", Vector = [1f, 0f] }
+        ]);
+
+        var results = service.SearchDocuments("容器编排", 20, index, [1f, 0f]);
+
+        Assert.Single(results);
+        Assert.Equal("B", results[0].Id);
+        Assert.Equal(2, index.GetChunks("B").Count);
+        Assert.Equal(1, index.GetMaxSimilarity("B", [1f, 0f]));
+    }
+
+    [Fact]
+    public void SearchMemoryEntries_FindsSemanticMatchWithoutKeywordOverlap()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lkb-memory-search-" + Guid.NewGuid().ToString("N"));
+        var service = new KnowledgeBaseService(directory);
+        var memory = service.AddMemoryEntry(new MemoryEntry { Id = "m1", Title = "决策", Content = "采用本地持久化" });
+        var index = new VectorIndexService(service.DataDirectory);
+        index.SetChunks(VectorIndexService.MemoryIndexKey(memory.Id), "m", [
+            new VectorChunk { Index = 0, Text = "本地持久化", Vector = [0.9f, 0.1f] }
+        ]);
+
+        var results = service.SearchMemoryEntries("分布式存储", 10, index, [1f, 0f]);
+
+        Assert.Single(results);
+        Assert.Equal("m1", results[0].Id);
+    }
+
+    [Fact]
     public void Search_KeywordAndSemanticCombine_InHybridScore()
     {
         var service = CreateService();
@@ -186,12 +259,23 @@ public sealed class EmbeddingClientTests
             Content = new StringContent(body, Encoding.UTF8, "application/json")
         };
 
+    /// <summary>按请求 input 的条目数动态返回同数量向量（块数与查询向量一致）。</summary>
+    private static HttpResponseMessage Embeddings(HttpRequestMessage request)
+    {
+        var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+        using var document = JsonDocument.Parse(body);
+        var items = new List<string>();
+        foreach (var element in document.RootElement.GetProperty("input").EnumerateArray())
+            items.Add("{\"index\":" + items.Count + ",\"embedding\":[0.1,0.9]}");
+        return Json("{\"data\":[" + string.Join(",", items) + "]}");
+    }
+
     [Fact]
     public async Task EmbedBatchAsync_ParsesVectorsAndSendsModel()
     {
         var handler = new StubHandler
         {
-            Responder = _ => Json("""{"data":[{"index":0,"embedding":[0.1,0.9]},{"index":1,"embedding":[0.5,0.5]}]}""")
+            Responder = _ => Json("""{"data":[{"index":1,"embedding":[0.5,0.5]},{"index":0,"embedding":[0.1,0.9]}]}""")
         };
         var client = new EmbeddingClient("http://localhost:11434/v1", "nomic-embed-text", "secret", handler);
 
@@ -200,6 +284,7 @@ public sealed class EmbeddingClientTests
         Assert.NotNull(vectors);
         Assert.Equal(2, vectors.Count);
         Assert.Equal(new[] { 0.1f, 0.9f }, vectors[0]);
+        Assert.Equal(new[] { 0.5f, 0.5f }, vectors[1]);
         Assert.Equal("Bearer secret",
             Assert.Single(handler.LastRequest!.Headers.GetValues("Authorization")));
         Assert.Contains("\"model\":\"nomic-embed-text\"", handler.LastBody);
@@ -218,6 +303,134 @@ public sealed class EmbeddingClientTests
 
         Assert.Null(vector);
         Assert.NotNull(client.LastError);
+    }
+
+    [Fact]
+    public async Task IndexingService_RetriesEmbeddingFailureAndClearsErrorOnSuccess()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lkb-indexing-" + Guid.NewGuid().ToString("N"));
+        using var knowledgeBase = new KnowledgeBaseService(directory);
+        var document = knowledgeBase.AddDocument(new Document { Title = "Title", Content = "Content" });
+        var vectors = new VectorIndexService(directory);
+        var attempts = 0;
+        var embedder = new EmbeddingClient("http://localhost:11434/v1", "m", handler: new StubHandler
+        {
+            Responder = request => ++attempts == 1
+                ? throw new HttpRequestException("temporary failure")
+                : Embeddings(request)
+        });
+        var indexing = new DocumentIndexingService(knowledgeBase, vectors, embedder, TimeSpan.Zero);
+
+        await indexing.StartAsync(CancellationToken.None);
+        indexing.Enqueue(document.Id);
+        await WaitUntilAsync(() => vectors.Get(document.Id) is not null);
+        await indexing.StopAsync(CancellationToken.None);
+
+        Assert.Equal(2, attempts);
+        Assert.Null(indexing.LastError);
+        Assert.Equal(new[] { 0.1f, 0.9f }, vectors.Get(document.Id)!.Vector);
+    }
+
+    [Fact]
+    public async Task IndexingService_DeduplicatesQueuedDocumentIds()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lkb-index-dedupe-" + Guid.NewGuid().ToString("N"));
+        using var knowledgeBase = new KnowledgeBaseService(directory);
+        var document = knowledgeBase.AddDocument(new Document { Title = "Title", Content = "Content" });
+        var vectors = new VectorIndexService(directory);
+        var requests = 0;
+        var embedder = new EmbeddingClient("http://localhost:11434/v1", "m", handler: new StubHandler
+        {
+            Responder = request =>
+            {
+                Interlocked.Increment(ref requests);
+                return Embeddings(request);
+            }
+        });
+        var indexing = new DocumentIndexingService(knowledgeBase, vectors, embedder, TimeSpan.Zero);
+
+        for (var i = 0; i < 10; i++)
+            indexing.Enqueue(document.Id);
+        Assert.Equal(1, indexing.PendingCount);
+
+        await indexing.StartAsync(CancellationToken.None);
+        await WaitUntilAsync(() => vectors.Get(document.Id) is not null);
+        await indexing.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, requests);
+        Assert.Equal(0, indexing.PendingCount);
+    }
+
+    [Fact]
+    public void IndexingService_QueueOverflow_SkipsAndReportsError()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lkb-index-full-" + Guid.NewGuid().ToString("N"));
+        using var knowledgeBase = new KnowledgeBaseService(directory);
+        var indexing = new DocumentIndexingService(knowledgeBase, new VectorIndexService(directory));
+
+        for (var i = 0; i < 1000; i++)
+            indexing.Enqueue("d" + i);
+        Assert.Equal(1000, indexing.PendingCount);
+
+        indexing.Enqueue("overflow");
+        Assert.Equal(1000, indexing.PendingCount);
+        Assert.Contains("队列已满", indexing.LastError);
+    }
+
+    [Fact]
+    public async Task IndexingService_IndexesMemoryEntriesByNamespacedId()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lkb-index-memory-" + Guid.NewGuid().ToString("N"));
+        using var knowledgeBase = new KnowledgeBaseService(directory);
+        var memory = knowledgeBase.AddMemoryEntry(new MemoryEntry { Id = "m1", Title = "Preference", Content = "Use concise answers" });
+        var vectors = new VectorIndexService(directory);
+        var embedder = new EmbeddingClient("http://localhost:11434/v1", "m", handler: new StubHandler
+        {
+            Responder = Embeddings
+        });
+        var indexing = new DocumentIndexingService(knowledgeBase, vectors, embedder, TimeSpan.Zero);
+
+        await indexing.StartAsync(CancellationToken.None);
+        indexing.EnqueueMemory(memory.Id);
+        await WaitUntilAsync(() => vectors.Get(VectorIndexService.MemoryIndexKey(memory.Id)) is not null);
+        await indexing.StopAsync(CancellationToken.None);
+
+        Assert.Null(vectors.Get(memory.Id));
+        Assert.Equal(1, vectors.Count);
+        Assert.Equal(new[] { 0.1f, 0.9f }, vectors.Get(VectorIndexService.MemoryIndexKey(memory.Id))!.Vector);
+    }
+
+    [Fact]
+    public async Task IndexingService_ExposesErrorAfterRetriesAreExhausted()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lkb-indexing-" + Guid.NewGuid().ToString("N"));
+        using var knowledgeBase = new KnowledgeBaseService(directory);
+        var document = knowledgeBase.AddDocument(new Document { Title = "Title", Content = "Content" });
+        var attempts = 0;
+        var embedder = new EmbeddingClient("http://localhost:11434/v1", "m", handler: new StubHandler
+        {
+            Responder = _ =>
+            {
+                attempts++;
+                throw new HttpRequestException("service unavailable");
+            }
+        });
+        var indexing = new DocumentIndexingService(knowledgeBase, new VectorIndexService(directory), embedder, TimeSpan.Zero);
+
+        await indexing.StartAsync(CancellationToken.None);
+        indexing.Enqueue(document.Id);
+        await WaitUntilAsync(() => indexing.PendingCount == 0 && attempts == 3 && indexing.LastError?.Contains("第 3 次") == true);
+        await indexing.StopAsync(CancellationToken.None);
+
+        Assert.Equal(3, attempts);
+        Assert.Contains("service unavailable", indexing.LastError);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!condition())
+            await Task.Delay(10, timeout.Token);
     }
 }
 

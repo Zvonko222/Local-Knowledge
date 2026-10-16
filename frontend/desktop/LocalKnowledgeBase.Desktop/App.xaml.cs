@@ -1,9 +1,9 @@
-using System.IO;
 using System.Windows;
 using LocalKnowledgeBase.Desktop.Services;
 using LocalKnowledgeBase.Desktop.ViewModels;
 using LocalKnowledgeBase.Desktop.Views;
 using Microsoft.Extensions.DependencyInjection;
+using Localization = LocalKnowledgeBase.Desktop.Services.Localization;
 
 namespace LocalKnowledgeBase.Desktop;
 
@@ -23,18 +23,12 @@ public partial class App : Application
         // 未处理异常：写日志 + 弹窗提示（只弹一次，避免布局期异常递归弹窗），避免应用静默消失
         DispatcherUnhandledException += (_, args) =>
         {
-            try
+            var disposition = CrashLogger.Log(args.Exception);
+            if (disposition == CrashLogDisposition.Repeated)
             {
-                var logPath = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "LocalKnowledgeBase", "crash.log");
-                Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
-                File.AppendAllText(logPath,
-                    $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}] {args.Exception}\n\n");
-            }
-            catch
-            {
-                // 日志写不进去也不能妨碍后续处理
+                args.Handled = true;
+                Shutdown(1);
+                return;
             }
 
             if (!_crashDialogShown)
@@ -49,15 +43,32 @@ public partial class App : Application
             args.Handled = true;
         };
 
+        var clientSettings = ClientSettingsService.Load();
+
+        // 调色板最先合并：样式解析时从调色板取色（背景主题在设置页选择，重启后生效）
+        var paletteSource = clientSettings.Background switch
+        {
+            "cool" => "Themes/Palette.Cool.xaml",
+            "warm" => "Themes/Palette.Warm.xaml",
+            _ => "Themes/Palette.Default.xaml"
+        };
+        Resources.MergedDictionaries.Insert(0,
+            new ResourceDictionary { Source = new Uri(paletteSource, UriKind.Relative) });
+
+        // 界面语言：把全部文案写入应用资源（XAML 用 DynamicResource），供设置页运行时切换
+        var localization = new Localization();
+        localization.SetCulture(clientSettings.Language);
+
         var services = new ServiceCollection();
-        ConfigureServices(services);
+        services.AddSingleton<ILocalization>(localization);
+        ConfigureServices(services, clientSettings, localization);
         _services = services.BuildServiceProvider();
 
         var mainWindow = _services.GetRequiredService<MainWindow>();
         MainWindow = mainWindow;
         mainWindow.Show();
 
-        // 启动后异步探测一次 API 连接，结果写入状态栏
+        // 启动后异步探测一次 API 连接，结果写入状态栏，并触发首屏数据加载
         _ = _services.GetRequiredService<ShellViewModel>().InitializeAsync();
     }
 
@@ -67,7 +78,8 @@ public partial class App : Application
         base.OnExit(e);
     }
 
-    private static void ConfigureServices(IServiceCollection services)
+    private static void ConfigureServices(IServiceCollection services, ClientSettings clientSettings,
+        Localization localization)
     {
         // 基础服务
         // StatusReporter 按具体类型注册：ShellViewModel 用它做绑定源，页面用 IStatusReporter 上报
@@ -75,12 +87,13 @@ public partial class App : Application
         services.AddSingleton<IStatusReporter>(sp => sp.GetRequiredService<StatusReporter>());
         services.AddSingleton<IDialogService, DialogService>();
 
-        var clientSettings = ClientSettingsService.Load();
         services.AddSingleton<IKnowledgeApiClient>(_ =>
             new KnowledgeBaseApiClient(clientSettings.ApiBaseUrl));
         // 本地大模型（AI 问答用）：地址、模型与密钥来自 client_settings.json，设置页可随时修改
         services.AddSingleton<ILlmClient>(_ =>
             new OpenAiCompatibleLlmClient(clientSettings.LlmBaseUrl, clientSettings.LlmModel, clientSettings.LlmApiKey));
+
+        services.AddSingleton(localization);
 
         // 页面 ViewModel（Shell 为单例：MainWindow 注入的实例与 App 启动初始化的是同一个；
         // 页面 VM 随 Shell 只创建一套，页面切换不重建）

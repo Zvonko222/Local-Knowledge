@@ -24,6 +24,9 @@ public interface IDialogService
     /// <summary>在资源管理器中打开本地目录（用于查看/备份数据目录）。</summary>
     void OpenInExplorer(string path);
 
+    /// <summary>在资源管理器中定位并选中一个文件。</summary>
+    void RevealFile(string filePath);
+
     /// <summary>确认对话框，返回用户是否点了“是”。</summary>
     bool Confirm(string title, string message);
 }
@@ -74,6 +77,14 @@ public sealed class DialogService : IDialogService
             FileName = path,
             UseShellExecute = true
         });
+    }
+
+    public void RevealFile(string filePath)
+    {
+        if (!File.Exists(filePath))
+            return;
+
+        Process.Start("explorer.exe", $"/select,\"{filePath}\"");
     }
 
     public bool Confirm(string title, string message)

@@ -57,9 +57,14 @@ public sealed class TagFilterItem : ViewModelBase
 
     public bool IsAll => Tag is null;
 
+    /// <summary>本地化覆盖标签（由 VM 在语言切换/重建时填入）；空则用内置中文。</summary>
+    public string? LabelOverride { get; set; }
+
     public string Label =>
-        Tag is null ? $"全部 ({TotalDocs})"
-        : Tag!.Length == 0 ? $"未分类 ({Count})"
+        Tag is null
+            ? LabelOverride ?? $"全部 ({TotalDocs})"
+        : Tag!.Length == 0
+            ? LabelOverride ?? $"未分类 ({Count})"
         : $"{Tag} ({Count})";
 }
 
@@ -72,6 +77,7 @@ public sealed class DocumentsViewModel : PageViewModelBase
     private readonly IKnowledgeApiClient _api;
     private readonly IDialogService _dialogs;
     private readonly IStatusReporter _status;
+    private readonly ILocalization _localization;
 
     private List<Document> _allDocuments = new();
     private string _filterText = string.Empty;
@@ -83,11 +89,13 @@ public sealed class DocumentsViewModel : PageViewModelBase
     private string _detailMeta = string.Empty;
     private string _statusText = string.Empty;
 
-    public DocumentsViewModel(IKnowledgeApiClient api, IDialogService dialogs, IStatusReporter status)
+    public DocumentsViewModel(IKnowledgeApiClient api, IDialogService dialogs, IStatusReporter status,
+        ILocalization localization)
     {
         _api = api;
         _dialogs = dialogs;
         _status = status;
+        _localization = localization;
 
         ImportCommand = new AsyncRelayCommand(ImportFromDialogAsync, onException: ShowFault);
         LoadCommand = new AsyncRelayCommand(LoadAsync, onException: ShowFault);
@@ -97,6 +105,7 @@ public sealed class DocumentsViewModel : PageViewModelBase
         ExportCommand = new RelayCommand(ExportSelected, () => HasSelection);
         ExportAllCommand = new AsyncRelayCommand(ExportAllAsync, onException: ShowFault);
         SelectRelatedCommand = new ParameterRelayCommand(o => SelectRelatedById(o as string));
+        OpenFileLocationCommand = new AsyncRelayCommand(OpenFileLocationAsync, () => HasSelection, onException: ShowFault);
     }
 
     private int _relatedRequestId;
@@ -118,6 +127,24 @@ public sealed class DocumentsViewModel : PageViewModelBase
                 RelatedDocuments.Add(new RelatedDocumentItem(item.Title, item.DocumentId, item.Similarity));
             OnPropertyChanged(nameof(HasRelatedDocuments));
         }
+    }
+
+    /// <summary>在资源管理器中定位选中文档的原始文件（无原始文件时提示）。</summary>
+    public async Task OpenFileLocationAsync()
+    {
+        if (SelectedDocument is not { } document)
+            return;
+
+        StatusText = "正在定位文件位置…";
+        var path = await _api.GetDocumentFilePathAsync(document.Id);
+        if (string.IsNullOrEmpty(path))
+        {
+            StatusText = "未找到该文档的原始文件。";
+            return;
+        }
+
+        StatusText = $"文件位置：{path}";
+        _dialogs.RevealFile(path);
     }
 
     /// <summary>点击相关文档：在列表中定位并选中（被过滤隐藏时仅提示）。</summary>
@@ -165,6 +192,7 @@ public sealed class DocumentsViewModel : PageViewModelBase
     public ICommand ExportCommand { get; }
     public ICommand ExportAllCommand { get; }
     public ICommand SelectRelatedCommand { get; }
+    public ICommand OpenFileLocationCommand { get; }
 
     /// <summary>本地筛选关键词（标题、标签、类型、正文），输入即过滤，不请求 API。</summary>
     public string FilterText
@@ -479,11 +507,17 @@ public sealed class DocumentsViewModel : PageViewModelBase
         }
 
         TagFilters.Clear();
-        TagFilters.Add(new TagFilterItem(null, _allDocuments.Count, _allDocuments.Count));
+        TagFilters.Add(new TagFilterItem(null, _allDocuments.Count, _allDocuments.Count)
+        {
+            LabelOverride = $"{_localization.Get("Chip_All")} ({_allDocuments.Count})"
+        });
         foreach (var pair in counts)
             TagFilters.Add(new TagFilterItem(pair.Key, pair.Value, _allDocuments.Count));
         if (untagged > 0)
-            TagFilters.Add(new TagFilterItem(string.Empty, untagged, _allDocuments.Count));
+            TagFilters.Add(new TagFilterItem(string.Empty, untagged, _allDocuments.Count)
+            {
+                LabelOverride = $"{_localization.Get("Chip_Untagged")} ({untagged})"
+            });
 
         OnPropertyChanged(nameof(HasTagFilters));
 

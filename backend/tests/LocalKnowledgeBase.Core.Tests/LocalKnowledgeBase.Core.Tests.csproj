@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\LocalKnowledgeBase.Core\LocalKnowledgeBase.Core.csproj" />
+    <ProjectReference Include="..\..\LocalKnowledgeBase.Api\LocalKnowledgeBase.Api.csproj" />
   </ItemGroup>
 
 </Project>

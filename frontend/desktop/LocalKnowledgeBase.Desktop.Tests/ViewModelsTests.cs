@@ -10,7 +10,7 @@ namespace LocalKnowledgeBase.Desktop.Tests;
 public sealed class DocumentsViewModelTests
 {
     private static DocumentsViewModel CreateViewModel(FakeKnowledgeApiClient api, FakeDialogService dialogs) =>
-        new(api, dialogs, new StatusReporter());
+        new(api, dialogs, new StatusReporter(), new Localization());
 
     [Fact]
     public async Task Load_PopulatesDocumentsFromApi()
@@ -152,7 +152,7 @@ public sealed class TagFilterTests
 
     private static DocumentsViewModel CreateLoaded(FakeKnowledgeApiClient api)
     {
-        var viewModel = new DocumentsViewModel(api, new FakeDialogService(), new StatusReporter());
+        var viewModel = new DocumentsViewModel(api, new FakeDialogService(), new StatusReporter(), new Localization());
         viewModel.LoadAsync().GetAwaiter().GetResult();
         return viewModel;
     }

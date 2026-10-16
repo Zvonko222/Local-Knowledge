@@ -20,7 +20,7 @@ public sealed class KnowledgeBaseApiClient : IDisposable
     public sealed record SearchResponse(string Query, List<Document> Results);
 
     /// <summary>GET（POST）/api/ai/context 的返回。</summary>
-    public sealed record AiSourceDto(int Index, string Title, string DocumentId);
+    public sealed record AiSourceDto(int Index, string Title, string DocumentId, string SourceType = "document", string? MemoryEntryId = null);
 
     public sealed record RelatedDocumentDto(string Title, string DocumentId, double Similarity);
 
@@ -28,7 +28,7 @@ public sealed class KnowledgeBaseApiClient : IDisposable
 
     public sealed record ProfileResponse(string Preset, int MaxResults, int SnippetLength, int MaxTotalChars, double TokenWeight);
 
-    public sealed record AiContextResponse(string Query, int TotalHits, int IncludedCount, bool Truncated, string Context, List<AiSourceDto> Sources);
+    public sealed record AiContextResponse(string Query, int TotalHits, int IncludedCount, bool Truncated, string Context, List<AiSourceDto> Sources, bool SemanticUsed = false);
 
     private readonly HttpClient _httpClient;
 
@@ -130,11 +130,12 @@ public sealed class KnowledgeBaseApiClient : IDisposable
             await ReadJsonAsync<MemoryEntry>(
                 await _httpClient.GetAsync($"api/knowledge-base/memory/{id}")));
 
-    public Task<List<MemoryEntry>?> SearchMemoryEntriesAsync(string query) =>
+    public Task<List<MemoryEntry>?> SearchMemoryEntriesAsync(string query, int? max = null) =>
         SendAsync(async () =>
             await ReadJsonAsync<List<MemoryEntry>>(
                 await _httpClient.GetAsync(
-                    $"api/knowledge-base/memory/search?q={Uri.EscapeDataString(query)}")));
+                    $"api/knowledge-base/memory/search?q={Uri.EscapeDataString(query)}" +
+                    (max is null ? string.Empty : $"&max={max}"))));
 
     public Task<MemoryEntry?> AddMemoryEntryAsync(string title, string content, string? tags) =>
         SendAsync(async () =>

@@ -135,6 +135,13 @@ public sealed class FakeKnowledgeApiClient : IKnowledgeApiClient
 
     public Task<bool> SetDataDirectoryAsync(string path) => Task.FromResult(true);
 
+    public Task<string?> GetDocumentFilePathAsync(string id) =>
+        Task.FromResult<string?>(null);
+
+    public void RevealFile(string filePath)
+    {
+    }
+
     public List<RelatedDocumentDto> RelatedToReturn { get; } = new();
 
     public string CurrentProfile { get; private set; } = "standard";
@@ -181,6 +188,8 @@ public sealed class FakeDialogService : IDialogService
     public string? PickSaveFile(string title, string filter, string defaultFileName) => NextSavePath;
 
     public void OpenInExplorer(string path) => OpenInExplorerCallCount++;
+
+    public void RevealFile(string filePath) => OpenInExplorerCallCount++;
 
     public bool Confirm(string title, string message)
     {

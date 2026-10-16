@@ -142,6 +142,18 @@ public sealed class KnowledgeBaseApiClient : IKnowledgeApiClient
                 : null;
         });
 
+    public Task<string?> GetDocumentFilePathAsync(string id) =>
+        SendAsync(async () =>
+        {
+            var response = await _httpClient.GetAsync($"api/knowledge-base/documents/{id}/file-path");
+            if (!IsSuccess(response))
+                return null;
+            using var document = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            return document.RootElement.TryGetProperty("path", out var path)
+                ? path.GetString()
+                : null;
+        });
+
     public Task<List<RelatedDocumentDto>?> GetRelatedAsync(string id, int max = 5) =>
         SendAsync(async () =>
         {

@@ -383,13 +383,9 @@ public class KnowledgeBaseService : IDisposable
                     var score = (double)ScoreText(d.Title, d.Tags, d.Content, terms);
                     if (useSemantic)
                     {
-                        var record = vectorIndex!.Get(d.Id);
-                        if (record is { } rec && rec.Vector.Length == queryVector!.Length)
-                        {
-                            var cosine = VectorIndexService.CosineSimilarity(queryVector, rec.Vector);
-                            if (cosine > 0)
-                                score += cosine * SemanticWeight;
-                        }
+                        var cosine = vectorIndex!.GetMaxSimilarity(d.Id, queryVector!);
+                        if (cosine > 0)
+                            score += cosine * SemanticWeight;
                     }
                     return (Doc: d, Score: score);
                 })
@@ -463,21 +459,34 @@ public class KnowledgeBaseService : IDisposable
         }
     }
 
-    /// <summary>检索项目记忆：与文档检索同样的关键词打分排序。</summary>
-    public List<MemoryEntry> SearchMemoryEntries(string query)
+    /// <summary>检索项目记忆：关键词分与向量语义分混合排序。</summary>
+    public List<MemoryEntry> SearchMemoryEntries(string query, int maxResults = 20,
+        VectorIndexService? vectorIndex = null, float[]? queryVector = null)
     {
         lock (_lock)
         {
             var terms = TokenizeQuery(query);
-            if (terms.Count == 0)
+            var useSemantic = queryVector is { Length: > 0 } && vectorIndex is not null;
+            if (terms.Count == 0 && !useSemantic)
                 return new List<MemoryEntry>();
 
             return _memoryEntries!
-                .Select(m => (Entry: m, Score: ScoreText(m.Title, m.Tags, m.Content, terms)))
-                .Where(x => x.Score > 0)
-                .OrderByDescending(x => x.Score)
-                .ThenByDescending(x => x.Entry.UpdatedAt)
-                .Select(x => x.Entry)
+                .Select(entry =>
+                {
+                    var score = (double)ScoreText(entry.Title, entry.Tags, entry.Content, terms);
+                    if (useSemantic)
+                    {
+                        var semantic = vectorIndex!.GetMaxSimilarity(VectorIndexService.MemoryIndexKey(entry.Id), queryVector!);
+                        if (semantic > 0)
+                            score += semantic * SemanticWeight;
+                    }
+                    return (Entry: entry, Score: score);
+                })
+                .Where(result => result.Score > 0)
+                .OrderByDescending(result => result.Score)
+                .ThenByDescending(result => result.Entry.UpdatedAt)
+                .Take(Math.Clamp(maxResults, 1, 100))
+                .Select(result => result.Entry)
                 .ToList();
         }
     }
@@ -512,6 +521,52 @@ public class KnowledgeBaseService : IDisposable
         return chunks;
     }
 
+    private static readonly char[] SentenceBoundaries =
+        ['。', '！', '？', '；', '!', '?', ';', '.', '，', ',', '：', ':'];
+
+    /// <summary>
+    /// 索引用分块：先按换行拆段落，短段落整段成块；长段落再按句末标点收尾切分，
+    /// 单句超长时按固定大小硬切。块之间不重叠，保证句子完整、起点单调前移。
+    /// </summary>
+    public static List<string> ChunkTextOnBoundaries(string text, int chunkSize = 500)
+    {
+        var chunks = new List<string>();
+        if (string.IsNullOrWhiteSpace(text))
+            return chunks;
+        if (chunkSize < 2)
+            return [text];
+
+        text = text.Replace("\r\n", "\n").Replace("\r", "\n");
+
+        foreach (var paragraph in text.Split('\n'))
+        {
+            var trimmed = paragraph.Trim();
+            if (trimmed.Length == 0)
+                continue;
+            if (trimmed.Length <= chunkSize)
+            {
+                chunks.Add(trimmed);
+                continue;
+            }
+
+            var start = 0;
+            while (start < trimmed.Length)
+            {
+                var end = Math.Min(start + chunkSize, trimmed.Length);
+                if (end < trimmed.Length)
+                {
+                    var boundary = trimmed.LastIndexOfAny(SentenceBoundaries, end - 1, end - start);
+                    if (boundary > start)
+                        end = boundary + 1;
+                }
+                chunks.Add(trimmed.Substring(start, end - start));
+                start = end;
+            }
+        }
+
+        return chunks;
+    }
+
     public static string ExtractTextFromFile(string filePath, byte[]? fileContent = null)
     {
         if (fileContent != null)
@@ -539,6 +594,26 @@ public class KnowledgeBaseService : IDisposable
 
     /// <summary>公开的标签规范化（去空白、去重、逗号分隔），供 API 导入时使用。</summary>
     public static string? NormalizeTagsPublic(string? tags) => NormalizeTags(tags);
+
+    /// <summary>
+    /// 取文档原始文件的完整路径（数据目录/raw_files/存储名）；
+    /// 文档不存在或原始文件已被删除时返回 null。
+    /// </summary>
+    public string? GetDocumentFilePath(string documentId)
+    {
+        lock (_lock)
+        {
+            var document = _documents!.FirstOrDefault(d => d.Id == documentId);
+            if (document is null)
+                return null;
+
+            var path = GetRawFilePath(document.StoredFileName);
+            if (path is not null && File.Exists(path))
+                return path;
+
+            return null;
+        }
+    }
 
     private static string? NormalizeTags(string? tags)
     {

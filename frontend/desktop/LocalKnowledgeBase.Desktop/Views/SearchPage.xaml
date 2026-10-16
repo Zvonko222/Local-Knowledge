@@ -15,8 +15,8 @@
                     Margin="34,28,34,40"
                     HorizontalAlignment="Center">
             <StackPanel Margin="0,0,0,22">
-                <TextBlock Text="搜索" Style="{StaticResource HeadingLarge}" />
-                <TextBlock Text="文档标题、正文和标签"
+                <TextBlock Text="{DynamicResource Str_Search_Title}" Style="{StaticResource HeadingLarge}" />
+                <TextBlock Text="{DynamicResource Str_Search_Subtitle}"
                            Margin="0,6,0,0"
                            Style="{StaticResource BodyText}" />
             </StackPanel>
@@ -44,7 +44,7 @@
                                            Margin="0,0,7,0"
                                            FontFamily="{StaticResource IconFont}"
                                            FontSize="14" />
-                                <TextBlock Text="搜索" />
+                                <TextBlock Text="{DynamicResource Str_Btn_Search}" />
                             </StackPanel>
                         </Button>
                     </Grid>
@@ -63,7 +63,7 @@
                 <TextBlock Text="{Binding ResultCountText}"
                            Style="{StaticResource HeadingMedium}" />
                 <TextBlock Grid.Column="1"
-                           Text="正文命中结果"
+                           Text="{DynamicResource Str_Search_Hint}"
                            VerticalAlignment="Center"
                            Style="{StaticResource CaptionText}" />
             </Grid>
@@ -134,7 +134,7 @@
                                Foreground="{StaticResource TextTertiaryBrush}"
                                FontFamily="{StaticResource IconFont}"
                                FontSize="22" />
-                    <TextBlock Text="暂无搜索结果"
+                    <TextBlock Text="{DynamicResource Str_Search_NoResults}"
                                Margin="0,10,0,0"
                                HorizontalAlignment="Center"
                                Style="{StaticResource BodyText}" />

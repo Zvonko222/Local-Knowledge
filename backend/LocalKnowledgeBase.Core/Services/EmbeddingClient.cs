@@ -24,8 +24,11 @@ public sealed class EmbeddingClient
         (BaseUrl, Model) = Normalize(baseUrl, model);
         _apiKey = (apiKey ?? string.Empty).Trim();
         _httpClient = handler is null
-            ? new HttpClient { Timeout = TimeSpan.FromMinutes(2) }
+            ? new HttpClient(new HttpClientHandler { UseProxy = false })
+            { Timeout = TimeSpan.FromMinutes(2) }
             : new HttpClient(handler) { Timeout = TimeSpan.FromMinutes(2) };
+        // 本地知识库只访问用户配置的服务地址（多为 localhost），
+        // 显式禁用系统代理，避免 Clash 类工具拦截导致请求挂起
         _httpClient.BaseAddress = new Uri(BaseUrl);
         // 每次请求使用独立连接：本地/内网调用开销可忽略，且避免对端 keep-alive 实现差异
         // （如轻量 stub/代理）导致的请求体丢失问题
@@ -81,22 +84,49 @@ public sealed class EmbeddingClient
             using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
             var data = document.RootElement.GetProperty("data");
 
-            var result = new List<float[]>(texts.Count);
+            var indexedVectors = new List<(int Index, float[] Vector)>();
             foreach (var item in data.EnumerateArray())
             {
                 var vector = new List<float>();
-                foreach (var v in item.GetProperty("embedding").EnumerateArray())
-                    vector.Add(v.GetSingle());
-                result.Add(vector.ToArray());
+                foreach (var value in item.GetProperty("embedding").EnumerateArray())
+                    vector.Add(value.GetSingle());
+                var index = item.TryGetProperty("index", out var indexValue)
+                    ? indexValue.GetInt32()
+                    : indexedVectors.Count;
+                indexedVectors.Add((index, vector.ToArray()));
             }
-            // OpenAI 协议保证返回顺序与 input 一致（带 index），这里按 index 归位以防万一
-            return result;
+            return indexedVectors.OrderBy(item => item.Index).Select(item => item.Vector).ToList();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             LastError = ex.Message;
             return null;
         }
+    }
+
+    public async Task<List<float[]>?> EmbedBatchedAsync(IReadOnlyList<string> texts, int batchSize = 32,
+        CancellationToken cancellationToken = default)
+    {
+        if (batchSize < 1)
+            throw new ArgumentOutOfRangeException(nameof(batchSize));
+        if (texts.Count == 0)
+            return new List<float[]>();
+
+        var result = new List<float[]>(texts.Count);
+        for (var offset = 0; offset < texts.Count; offset += batchSize)
+        {
+            var batch = texts.Skip(offset).Take(batchSize).ToList();
+            var vectors = await EmbedBatchAsync(batch, cancellationToken);
+            if (vectors is null || vectors.Count != batch.Count || vectors.Any(vector => vector.Length == 0))
+                return null;
+            result.AddRange(vectors);
+        }
+
+        return result;
     }
 
     public async Task<float[]?> EmbedAsync(string text, CancellationToken cancellationToken = default)

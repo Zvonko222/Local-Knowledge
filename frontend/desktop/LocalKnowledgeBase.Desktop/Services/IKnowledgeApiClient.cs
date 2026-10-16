@@ -41,6 +41,9 @@ public interface IKnowledgeApiClient : IDisposable
     /// <summary>与指定文档语义最相关的其他文档（基于后端向量索引）。</summary>
     Task<List<RelatedDocumentDto>?> GetRelatedAsync(string id, int max = 5);
 
+    /// <summary>文档原始文件的完整路径；无原始文件时返回 null。</summary>
+    Task<string?> GetDocumentFilePathAsync(string id);
+
     /// <summary>读取当前检索预算档位。</summary>
     Task<RetrievalProfileDto?> GetProfileAsync();
 

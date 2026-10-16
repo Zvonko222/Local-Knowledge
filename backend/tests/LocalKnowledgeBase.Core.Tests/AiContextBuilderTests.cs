@@ -1,5 +1,8 @@
+using LocalKnowledgeBase.Api.Controllers;
 using LocalKnowledgeBase.Core;
 using LocalKnowledgeBase.Core.Services;
+using Microsoft.AspNetCore.Mvc;
+using System.Text;
 
 namespace LocalKnowledgeBase.Core.Tests;
 
@@ -48,6 +51,101 @@ public sealed class AiContextBuilderTests
         Assert.Equal(0, context.TotalHits);
         Assert.Equal(string.Empty, context.ContextText);
         Assert.Empty(context.Sources);
+    }
+
+    [Fact]
+    public async Task GetContext_IncludesMemoryWhenNoDocumentMatches()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lkb-ai-memory-" + Guid.NewGuid().ToString("N"));
+        using var knowledgeBase = new KnowledgeBaseService(directory);
+        knowledgeBase.AddMemoryEntry(new MemoryEntry
+        {
+            Id = "m1",
+            Title = "架构决策",
+            Content = "项目采用本地优先架构"
+        });
+        var controller = new AiController(knowledgeBase);
+
+        var action = await controller.GetContext(new AiContextRequest("本地 架构", Max: 4), CancellationToken.None);
+
+        var response = Assert.IsType<AiContextResponse>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        var source = Assert.Single(response.Sources);
+        Assert.Equal("memory", source.SourceType);
+        Assert.Equal("m1", source.MemoryEntryId);
+        Assert.False(response.SemanticUsed);
+        Assert.Contains("[1] [项目记忆] 架构决策", response.Context);
+    }
+
+    [Fact]
+    public async Task GetContext_UsesSemanticMemoryMatchAndReturnsMatchedChunk()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lkb-ai-memory-semantic-" + Guid.NewGuid().ToString("N"));
+        using var knowledgeBase = new KnowledgeBaseService(directory);
+        var memory = knowledgeBase.AddMemoryEntry(new MemoryEntry
+        {
+            Id = "m-semantic",
+            Title = "Storage decision",
+            Content = new string('x', 600) + "The system stores structured records locally."
+        });
+        var vectors = new VectorIndexService(directory);
+        vectors.SetChunks(VectorIndexService.MemoryIndexKey(memory.Id), "test-embedding", [
+            new VectorChunk { Index = 0, Text = new string('x', 500), Vector = [0f, 1f] },
+            new VectorChunk { Index = 1, Text = "The system stores structured records locally.", Vector = [1f, 0f] }
+        ]);
+        var embedder = new EmbeddingClient("http://localhost:11434/v1", "test-embedding", handler: new StubEmbeddingHandler());
+        var controller = new AiController(knowledgeBase, vectors: vectors, embedder: embedder);
+
+        var action = await controller.GetContext(new AiContextRequest("where data persists"), CancellationToken.None);
+
+        var response = Assert.IsType<AiContextResponse>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        Assert.Contains("The system stores structured records locally.", response.Context);
+        Assert.DoesNotContain(new string('x', 100), response.Context);
+        Assert.Equal("m-semantic", Assert.Single(response.Sources).MemoryEntryId);
+        Assert.True(response.SemanticUsed);
+    }
+
+    private sealed class StubEmbeddingHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"data":[{"index":0,"embedding":[1,0]}]}""", Encoding.UTF8, "application/json")
+            });
+    }
+
+    [Fact]
+    public void Build_MixedDocumentsAndMemoriesKeepsTypesAndCitationIndicesAligned()
+    {
+        var items = new List<AiContextItem>
+        {
+            new("document", "d1", "架构说明", "服务分层"),
+            new("memory", "m1", "架构决策", "采用本地优先方案")
+        };
+
+        var context = AiContextBuilder.Build("架构", items);
+
+        Assert.Contains("[1] 架构说明", context.ContextText);
+        Assert.Contains("[2] [项目记忆] 架构决策", context.ContextText);
+        Assert.Equal("d1", context.Sources[0].DocumentId);
+        Assert.Equal("document", context.Sources[0].SourceType);
+        Assert.Equal("memory", context.Sources[1].SourceType);
+        Assert.Equal("m1", context.Sources[1].MemoryEntryId);
+        Assert.Equal(string.Empty, context.Sources[1].DocumentId);
+    }
+
+    [Fact]
+    public void Build_PrefersSemanticMatchSnippet()
+    {
+        var documents = new[]
+        {
+            new Document { Id = "d1", Title = "Long document", Content = "Beginning text. More irrelevant content." }
+        };
+
+        var context = AiContextBuilder.Build("semantic query", documents, 100,
+            semanticSnippets: new Dictionary<string, string> { ["d1"] = "Matched passage from the middle." });
+
+        Assert.Contains("Matched passage from the middle.", context.ContextText);
+        Assert.DoesNotContain("Beginning text.", context.ContextText);
     }
 
     [Fact]

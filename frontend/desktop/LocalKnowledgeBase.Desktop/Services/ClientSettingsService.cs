@@ -18,6 +18,12 @@ public sealed class ClientSettings
 
     /// <summary>API 密钥：云端 API 必填（以 Bearer 方式鉴权），本地服务（Ollama 等）留空。</summary>
     public string LlmApiKey { get; set; } = string.Empty;
+
+    /// <summary>界面语言："zh"（中文，默认）或 "en"（English）。</summary>
+    public string Language { get; set; } = "zh";
+
+    /// <summary>背景调色板："default"（米白+墨绿）/ "cool"（冷灰蓝）/ "warm"（暖米），重启后生效。</summary>
+    public string Background { get; set; } = "default";
 }
 
 public static class ClientSettingsService

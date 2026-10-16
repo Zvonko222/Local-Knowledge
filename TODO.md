@@ -48,7 +48,7 @@
 
 ## 第三阶段：知识库功能
 
-- [ ] 本地向量化（embedding）接入
+- [x] 本地向量化（embedding）接入（实现见第四阶段）
 - [x] 文档类型扩展：txt / md / **pdf（PdfPig 本地解析）** / **docx（解压提取正文）**
 - [x] MCP 工具 kb_add_document：AI 可把内容存入知识库
 - [x] 基于标签的文档筛选
@@ -70,9 +70,9 @@
 
 ## 第四阶段：进阶功能
 
-- [x] 向量相似度检索：OpenAI 兼容 embedding 接口 + vectors.json 向量索引，
-      混合排序（关键词分 + 余弦相似度×10），导入/更新/删除自动维护索引，
-      `POST /api/ai/index/rebuild` 重建；未配置 embedding 时自动退化为纯关键词检索
+- [x] 文档与项目记忆分块向量检索：OpenAI 兼容 embedding 接口 + vectors.json，
+      混合排序（关键词分 + 每条资料最高块余弦相似度×10），写入异步索引、删除维护，
+      `/api/ai/index/rebuild` 重建全部文档/记忆；无 embedding 时自动退化为纯关键词检索
 - [x] AI 辅助问答（桌面端“问答”页：检索知识库 → OpenAI 兼容模型生成带引用回答，云端 API 或本地均可）
 - [x] 全文检索升级：分词 + 词频/覆盖加成打分（标题 ×8 / 标签 ×4 / 正文按词频 ×2），整句提问与粘贴文本可命中
 - [x] 知识库一键导出 Markdown 合集（每篇一个 .md + _索引.md）
@@ -100,9 +100,9 @@
 
 - [x] 新增 `backend/LocalKnowledgeBase.Mcp`：stdio MCP 服务器（官方 C# SDK 2.2）
 - [x] MCP 经由本地 API 读写（API 为唯一写入方），避免双进程写文件互相覆盖
-- [x] 8 个工具：kb_status / kb_search_documents / kb_list_documents /
+- [x] 初版 8 个工具：kb_status / kb_search_documents / kb_list_documents /
       kb_get_document / kb_search_memory / kb_list_memory / kb_get_memory /
-      kb_save_memory
+      kb_save_memory（后续增至 12 个）
 - [x] 日志全部走 stderr，不污染 stdout 协议通道
 - [x] `LOCAL_KNOWLEDGE_BASE_API_URL` 环境变量配置 API 地址
 - [x] 新增 `scripts/run-mcp.ps1`、`scripts/publish-mcp.ps1`

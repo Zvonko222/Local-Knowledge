@@ -21,15 +21,21 @@ public sealed class LocalLlmClient
     public string BaseUrl { get; }
     public string Model { get; }
 
-    private LocalLlmClient(string baseUrl, string model, string apiKey)
+    public LocalLlmClient(string baseUrl, string model, string apiKey = "", HttpMessageHandler? handler = null)
     {
         BaseUrl = baseUrl;
         Model = model;
-        _httpClient = new HttpClient
-        {
-            BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/"),
-            Timeout = TimeSpan.FromMinutes(3) // 模型生成可能较慢
-        };
+        _httpClient = handler is null
+            ? new HttpClient
+            {
+                BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/"),
+                Timeout = TimeSpan.FromMinutes(3) // 模型生成可能较慢
+            }
+            : new HttpClient(handler)
+            {
+                BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/"),
+                Timeout = TimeSpan.FromMinutes(3)
+            };
         if (!string.IsNullOrWhiteSpace(apiKey))
             _httpClient.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey.Trim());

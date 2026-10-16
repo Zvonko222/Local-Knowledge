@@ -737,3 +737,96 @@ OpenWebUI、自研 Agent）只走 HTTP。本阶段在 API 上新增 AI 专用接
   其他测试；`RetrievalProfileService` 已支持显式目录注入，测试不再改全局环境。
 - 本轮档位切换测试曾把用户真实的档位文件留在 light，已清除（默认回 standard）。
 - 测试操纵进程级全局状态（环境变量）必须避免；改为被测对象支持显式依赖注入。
+
+---
+
+## 2026-10-11：界面修正与模型 API 配置体验（用户反馈轮）
+
+### 用户反馈与修复
+
+1. **应用图标仍是默认**：PIL 生成多尺寸 .ico（256/128/64/48/32/16，墨绿圆角 + 白色 LK +
+   琥珀点，与侧栏 Logo 同风格），csproj 设置 ApplicationIcon。
+   事故：写入时 `\a` 被 python 转义为 BEL(0x07) 损坏 XML——已修复并记录。
+2. **数据目录卡按钮重叠**：新增"备份"按钮时漏加 Grid 列定义（3 列放了 5 个元素），
+   col3/col4 叠在地址框上。已补至 5 列，真机截图确认一行整齐。
+3. **切换检索预算档位整个进程卡死**：ApplyProfile 在 UI 线程
+   `GetAwaiter().GetResult()` 同步阻塞等待捕获了 UI 上下文的 HTTP continuation
+   ——经典异步死锁。已改为 AsyncRelayCommand + async Task（执行期间按钮自动禁用），
+   并配单测（ApplyProfileAsync_SwitchesPresetViaApi）。
+4. **模型 API 配置体验**：以 DeepSeek 填写方式为准新增**服务商预设**下拉
+   （DeepSeek / 智谱 GLM / OpenAI / Ollama 本地 / 自定义），选择即自动填充
+   服务地址与示例模型；"不出本机"徽章更正为"检索在本机"（检索在本机、
+   生成阶段按用户配置的云端 API 调用）。
+
+### 验证
+
+- 测试 79/79：新增服务商预设自动填充、档位切换异步化用例
+- 真机截图：设置页数据目录五控件一行对齐、检索预算卡状态正确、
+  标题栏/任务栏显示新图标
+
+### 决定性验证（后台索引修复后）
+
+- 导入 1 篇文档：**0.02s 返回**（写路径不再被 embedding 阻塞）
+- 3 秒后：vectors.json 出现该文档向量（后台队列异步完成），indexed 计数正确
+- 删除文档：向量同步移除
+- 消费时文档已删除（竞态）→ 跳过该条，不复活向量（正确行为）
+- 附注：本机 11434 端口曾被多个测试 stub 进程占用/退出，造成过"消费者挂起 2 分钟
+  超时"的观测假象；生产环境对接真实 embedding 服务商时无此问题。
+
+---
+
+## 2026-10-11：启动崩溃修复：DataGrid 本地化资源与 crash.log 防爆
+
+### 根因
+
+- `DocumentsPage.xaml` 的 DataGrid 列头用 `{StaticResource Str_Col_Title}`，
+  但该静态资源查找发生在运行时资源注入之前，首屏布局直接抛
+  `Cannot find resource 'Str_Col_Title'`。
+- `MemoryPage.xaml` 还引用了未登记的 `Str_Col_Created`。
+- 未处理异常处理函数把布局循环中的每次异常都追加到
+  `%LOCALAPPDATA%\LocalKnowledgeBase\crash.log`，导致日志膨胀到约 220 MB。
+
+### 修复
+
+- DataGrid 列头改为 `TextBlock + DynamicResource`，不再依赖解析期静态资源。
+- 补充 `Str_Col_Created` 中英文资源，并扫描确认全部 XAML `Str_*` 引用均已登记。
+- 新增 `CrashLogger`：单文件上限 5 MB；同一异常签名最多记录 3 次；
+  重复异常触发退出，避免布局循环继续写爆磁盘。
+- 已清理原有 220 MB 的 `crash.log`。
+
+### 验证
+
+- 桌面端构建成功。
+- 桌面端测试 34/34 通过。
+- 实际启动应用运行 8 秒，进程保持运行，`crash.log` 保持 0 字节。
+
+---
+
+## 2026-10-16：记忆分块语义检索与生产运行文档
+
+### AI/RAG 实现
+
+- 项目记忆纳入与文档相同的分块 Embedding 索引，使用 `memory/<id>` 命名空间，避免与文档 ID 冲突。
+- 记忆新增/更新由后台索引队列处理，删除同步清除向量；写向量前重新校验条目内容，避免旧的异步请求在编辑/删除后写回过期向量。
+- `/api/ai/context`、`/api/ai/answer` 对文档和记忆都执行关键词 + 分块语义混合检索，按各自排名交替合并，并共用档位、条数和字符预算。
+- 上下文优先使用命中块；记忆引用以 `[n] [项目记忆] 标题` 显示，来源 DTO 保留 `documentId` 并提供 `sourceType` / `memoryEntryId`。
+- `/api/ai/index/rebuild` 同时重建两类资料，报告成功/失败/块数；`/api/ai/index/status` 报告待处理、总索引数、文档数、记忆数与最近错误。
+- 文档相关项接口只返回文档，不会把记忆索引键暴露成文档 ID。
+- 后台索引队列改为有界（容量 1000）+ 按条目去重：连续编辑同一资料只产生一个待处理任务，处理期间的新编辑仍会再次入队；满载时非阻塞跳过并把原因写入 `/api/ai/index/status` 的 `lastError`。
+- `GET /api/knowledge-base/memory/search` 与 MCP `kb_search_memory` 升级为混合检索（关键词 + 分块语义），支持 `max` 并套用检索预算档位；移除已不再被调用的同步 `TryIndexDocumentAsync` 死代码。
+- 索引用分块升级为**段落 + 句末边界收尾**（`ChunkTextOnBoundaries`）：短段落整段成块，长段落按句末标点切分、单句超长才硬切，避免固定 500 字符把句子拦腰截断；后台索引与重建均已改用。
+- 用户级 SKILL.md 同步新行为：`kb_get_context` 与搜索工具同时覆盖文档和记忆、记忆引用带 `[项目记忆]` 标注、两类来源共用 `max_chars` 预算。
+- `/api/ai/answer` 补端到端控制器测试（记忆单独命中 → 提示词含 `[项目记忆]` 标记与命中块 → 模型调用 → 来源返回记忆 ID；无命中不调模型；未配置模型返回 503），为此 `LocalLlmClient` 构造函数支持注入 `HttpMessageHandler` 测试桩。
+- `/api/ai/index/status` 新增 `chunks` 总块数；MCP 服务器已按新工具签名重新发布到 `backend\LocalKnowledgeBase.Mcp\publish`。
+- `/api/ai/context` 与 `/api/ai/answer` 响应新增 `semanticUsed`：Embedding 未配置、索引为空、模型不一致或查询向量化失败时为 `false`（纯关键词结果），调用方据此判断结果质量；MCP `kb_get_context` 返回体新增“语义检索”状态。用户级 SKILL.md 已同步最新版本。
+
+### 运维文档
+
+- README、教程和 TODO 同步当前分块索引、HTTP 契约、模型切换后重建、索引状态检查、备份/恢复与故障排查。
+- 明确当前 API 无内建身份认证，不应直接暴露到公网/不可信网络；云端 LLM/Embedding 会接收问题与检索内容。
+- 修正 PowerShell curl 示例、旧 MCP 工具数量和过期的测试数量/路线图描述。
+
+### 验证
+
+- `dotnet test LocalKnowledgeBase.slnx -c Debug`：后端 66/66、桌面端 34/34。
+- 覆盖记忆单独命中、语义记忆命中片段、分块索引更新/持久化、重试、队列去重与满载跳过、记忆搜索端点语义与条数限制、段落/句末分块边界、answer 端到端与空命中/未配置模型、文档相关项排除记忆。

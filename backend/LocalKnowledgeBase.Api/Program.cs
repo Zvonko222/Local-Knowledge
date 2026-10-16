@@ -41,6 +41,10 @@ if (!string.IsNullOrWhiteSpace(embedModel))
 // 可经 /api/ai/profile 读写，AI 亦可经 MCP 工具运行时切换
 builder.Services.AddSingleton<RetrievalProfileService>();
 
+// 后台向量索引：导入/更新立即返回，embedding 在后台异步完成（不阻塞写路径）
+builder.Services.AddSingleton<DocumentIndexingService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<DocumentIndexingService>());
+
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 

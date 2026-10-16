@@ -27,12 +27,12 @@
 | --- | --- |
 | 桌面客户端 | C# / WPF / XAML，手写 MVVM，`Microsoft.Extensions.DependencyInjection` |
 | API | ASP.NET Core Web API（.NET 10） |
-| 数据层 | `LocalKnowledgeBase.Core`：JSON 文件存储 + 混合检索（关键词打分 + 向量语义相似度）+ 文本提取（txt / md / pdf / docx，全部本地解析） |
-| AI 问答 | 先全文检索知识库，再交给 OpenAI 兼容模型（云端 API 或本地均可，支持密钥鉴权）生成带引用的回答 |
+| 数据层 | `LocalKnowledgeBase.Core`：JSON 文件存储 + 文档/记忆混合检索（关键词打分 + 分块向量语义相似度）+ 文本提取（txt / md / pdf / docx，本地解析） |
+| AI 问答 | 检索文档与项目记忆，使用命中片段构建有字符预算的上下文，再调用 OpenAI 兼容模型生成可追溯引用 |
 | 会话存本 | 对话知识按规范沉淀为记忆条目，作为**以硬盘为载体的超长上下文**供后续任意会话检索，检索带总字符预算控制 token 消耗 |
 | MCP 服务器 | 官方 C# SDK `ModelContextProtocol`，stdio 传输 |
-| AI HTTP 接口 | `api/ai`：检索上下文打包 + 完整问答（调本地模型），供 HTTP 工具/工作流接入 |
-| 测试 | xUnit（后端 Core 9 个用例 + 桌面 ViewModel 24 个用例） |
+| AI HTTP 接口 | `api/ai`：检索上下文打包 + 完整问答（OpenAI 兼容本地或云端模型），供 HTTP 工具/工作流接入 |
+| 测试 | xUnit（后端 Core 与桌面 ViewModel 测试；运行根解决方案命令查看当前数量） |
 | SDK | .NET 10 |
 
 ## 目录结构
@@ -113,7 +113,7 @@ dotnet test  LocalKnowledgeBase.slnx -c Debug
 | MCP → API 地址 | 环境变量 `LOCAL_KNOWLEDGE_BASE_API_URL` | MCP 服务器默认 `http://localhost:5062` |
 | 模型（桌面端问答） | `client_settings.json` 的 `LlmBaseUrl` / `LlmModel` / `LlmApiKey` | OpenAI 兼容接口，云端 API 或本地均可 |
 | 模型（AI HTTP 接口） | 环境变量 `LOCAL_KNOWLEDGE_BASE_LLM_URL` / `_MODEL` / `_KEY` | `/api/ai/answer` 用，未配置返回 503 |
-| Embedding 模型（语义检索） | 环境变量 `LOCAL_KNOWLEDGE_BASE_EMBED_MODEL`（地址/密钥复用 LLM 的两个变量） | 配置后检索自动叠加语义相似度；`POST /api/ai/index/rebuild` 重建索引 |
+| Embedding 模型（语义检索） | 环境变量 `LOCAL_KNOWLEDGE_BASE_EMBED_MODEL`（地址/密钥复用 LLM 的两个变量） | 配置后文档和记忆均异步分块索引、混合检索；切换模型后调用 `POST /api/ai/index/rebuild` |
 
 ## API 一览
 
@@ -128,22 +128,26 @@ dotnet test  LocalKnowledgeBase.slnx -c Debug
 | GET | `/search?q={query}&max={n}` | 全文检索文档 |
 | GET/POST | `/memory` | 记忆列表 / 新建记忆 |
 | GET/PUT/DELETE | `/memory/{id}` | 记忆详情 / 更新 / 删除 |
-| GET | `/memory/search?q={query}` | 检索记忆 |
+| GET | `/memory/search?q={query}&max={n}` | 检索记忆（关键词 + 可选分块语义，套用检索预算档位） |
 
 ### AI 专用接口（`/api/ai`）
 
 | 方法 | 端点 | 说明 |
 | --- | --- | --- |
 | GET | `/ai/status` | 模型配置状态、数据目录 |
-| POST | `/ai/context` | 检索并打包成带 [n] 编号引用的提示词上下文（不需要模型） |
-| POST | `/ai/answer` | 检索 + 本地大模型生成带引用回答（需配置模型，未配置返回 503） |
+| GET | `/ai/index/status` | Embedding 配置、待处理数、索引条目/文档/记忆数、块数与最近索引错误 |
+| POST | `/ai/index/rebuild` | 重建文档与记忆的分块向量，返回成功数、失败数和块数 |
+| POST | `/ai/context` | 混合检索文档与记忆，打包有预算限制的 [n] 引用上下文（不需要生成模型） |
+| POST | `/ai/answer` | 混合检索 + OpenAI 兼容模型生成带引用回答（需配置模型，未配置返回 503） |
 
-示例：
+`/context` 与 `/answer` 请求支持 `query`（必填）、`max`（命中条数，1–50）、`snippetLength`（单条片段字符数，50–5000）、`maxTotalChars`（总字符预算，200–50000）；未传参数时使用当前 light / standard / deep 档位。文档与记忆候选分别检索后按排名交替合并，`max` 是两类资料的合计上限。来源保留 `documentId`，并新增 `sourceType`（`document` / `memory`）和可选 `memoryEntryId`。响应中的 `semanticUsed` 表示本次是否叠加了向量语义排序（Embedding 未配置或查询向量化失败时为 `false`，即纯关键词结果）。
+
+典型运维检查与请求：
 
 ```powershell
-curl -sk -X POST https://localhost:7047/api/ai/context ^
-  -H "Content-Type: application/json" ^
-  -d '{"query":"架构说明","max":3}'
+curl.exe -sk https://localhost:7047/api/ai/index/status
+curl.exe -sk -X POST https://localhost:7047/api/ai/index/rebuild
+curl.exe -sk -X POST https://localhost:7047/api/ai/context -H "Content-Type: application/json" -d '{"query":"架构说明","max":3,"maxTotalChars":2000}'
 ```
 
 本地模型配置（供 `/ai/answer` 使用，与桌面端设置相互独立）：
@@ -166,17 +170,19 @@ AI 接口与 MCP 的关系：MCP 面向支持 MCP 协议的客户端；`api/ai` 
 
 ## MCP 工具一览
 
-MCP 服务器以 stdio 方式运行，暴露 9 个工具（统一 `kb_` 前缀）：
+MCP 服务器以 stdio 方式运行，暴露 12 个工具（统一 `kb_` 前缀）：
 
 | 工具 | 说明 |
 | --- | --- |
 | `kb_status` | 服务状态与数据目录 |
-| `kb_search_documents` | 全文检索文档（返回摘要） |
+| `kb_set_profile` | 切换检索预算档位（light / standard / deep） |
+| `kb_search_documents` | 全文与语义混合检索文档（返回摘要） |
 | `kb_list_documents` | 列出全部文档 |
 | `kb_get_document` | 读取文档完整正文 |
-| `kb_add_document` | 把 AI 整理的内容保存为新文档入库（支持标签，AI 可写入知识库） |
-| `kb_related_documents` | 找出与指定文档语义最相关的其他文档（基于向量索引） |
-| `kb_search_memory` | 检索项目记忆 |
+| `kb_get_context` | 混合检索文档和记忆，返回带引用上下文 |
+| `kb_related_documents` | 找出与指定文档语义最相关的其他文档 |
+| `kb_add_document` | 把 AI 整理的内容保存为新文档入库 |
+| `kb_search_memory` | 检索项目记忆（关键词 + 可选语义，支持条数限制） |
 | `kb_list_memory` | 列出全部记忆 |
 | `kb_get_memory` | 读取一条记忆 |
 | `kb_save_memory` | 新建/更新一条记忆（AI 可写入长期记忆） |
@@ -190,6 +196,7 @@ MCP 服务器以 stdio 方式运行，暴露 9 个工具（统一 `kb_` 前缀�
 <数据目录>/
 ├── documents.json      # 文档元数据与提取正文
 ├── memory.json         # 项目记忆
+├── vectors.json        # 文档与记忆的分块向量、模型名和块文本
 └── raw_files/          # 导入的原始文件（按内容生成安全文件名）
 ```
 
@@ -206,14 +213,20 @@ MCP 服务器以 stdio 方式运行，暴露 9 个工具（统一 `kb_` 前缀�
   [docs/desktop-frontend.md](docs/desktop-frontend.md)。
 - MCP 工具经由 API 读写数据（API 是唯一写入方），不要在 MCP 里直接操作 JSON 文件。
 - 核心行为变更需补测试，提交前跑通根解决方案的构建与测试。
+- 当前 API 未配置身份认证，默认仅供本机可信进程使用；不要直接绑定公网或不可信网络。需要远程访问时，应先部署受信任的认证/TLS 反向代理并限制来源。
+- 使用云端 LLM 时，检索到的上下文片段和问题会发送到配置的模型服务商；Embedding 请求也会发送文档/记忆文本到配置的 Embedding 服务。
+- 定期备份整个数据目录；更换 Embedding 模型前备份，切换后重建索引并检查 `/api/ai/index/status`。
 - 不提交构建产物、IDE 状态、日志和密钥。
 
-## 路线图
+## 当前 AI/RAG 能力
 
-- 本地向量化（embedding）接入
-- 向量相似度检索
-- AI 辅助问答（基于知识库生成回答）
-- PDF / Word 文档提取
+- 文档与项目记忆共用关键词 + 分块向量混合检索；分块按段落与句末边界收尾；无 Embedding 配置时自动退回关键词检索。
+- 文档/记忆新增与更新后异步索引，队列按条目去重且容量有限；删除同步清理向量；切换 Embedding 模型后需重建。
+- `/api/ai/context` 与 `/api/ai/answer` 使用同一检索预算，来源可区分文档和项目记忆。
+- `/api/ai/index/status` 可检查队列、索引数量和最近失败；重建响应包括成功、失败与块数。
+
+## 后续方向
+
 - 文档标签细化与交叉引用
 - 深色模式
 

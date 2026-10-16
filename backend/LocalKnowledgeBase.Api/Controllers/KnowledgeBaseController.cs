@@ -12,32 +12,17 @@ public sealed class KnowledgeBaseController : ControllerBase
     private readonly VectorIndexService? _vectors;
     private readonly EmbeddingClient? _embedder;
     private readonly RetrievalProfileService? _profiles;
+    private readonly Services.DocumentIndexingService? _indexing;
 
     public KnowledgeBaseController(KnowledgeBaseService service,
         VectorIndexService? vectors = null, EmbeddingClient? embedder = null,
-        RetrievalProfileService? profiles = null)
+        RetrievalProfileService? profiles = null, Services.DocumentIndexingService? indexing = null)
     {
         _service = service;
         _vectors = vectors;
         _embedder = embedder;
         _profiles = profiles;
-    }
-
-    /// <summary>为文档生成向量并写入索引（未配置 embedding 时跳过，失败不影响主流程）。</summary>
-    private async Task TryIndexDocumentAsync(Document document)
-    {
-        if (_embedder is null || _vectors is null || string.IsNullOrEmpty(document.Content))
-            return;
-        try
-        {
-            var vector = await _embedder.EmbedAsync(document.Title + "\n" + document.Content);
-            if (vector is { Length: > 0 })
-                _vectors.Set(document.Id, _embedder.Model, vector);
-        }
-        catch
-        {
-            // 向量索引失败不影响文档主流程；可用 POST /api/ai/index/rebuild 重建
-        }
+        _indexing = indexing;
     }
 
     /// <summary>混合检索的查询向量：embedding 未配置、索引为空或模型不一致时返回 null（退化纯关键词）。</summary>
@@ -160,7 +145,7 @@ public sealed class KnowledgeBaseController : ControllerBase
             document.Content = content;
 
             _service.AddDocument(document);
-            await TryIndexDocumentAsync(document); // 配置了 embedding 时同步写入向量索引
+            _indexing?.Enqueue(document.Id); // 向量化在后台异步完成，写入立即返回
             return CreatedAtAction(nameof(GetDocument), new { id = document.Id }, document);
         }
         catch (Exception ex)
@@ -181,13 +166,24 @@ public sealed class KnowledgeBaseController : ControllerBase
             if (document == null)
                 return NotFound(new { error = "Document not found" });
 
-            await TryIndexDocumentAsync(document); // 正文变化后刷新向量
+            _indexing?.Enqueue(document.Id); // 正文变化后后台刷新向量
             return Ok(document);
         }
         catch (Exception ex)
         {
             return StatusCode(500, new { error = ex.Message });
         }
+    }
+
+    /// <summary>文档原始文件的完整路径（不存在时 404）。供桌面端"打开文件所在位置"使用。</summary>
+    [HttpGet("documents/{id}/file-path")]
+    public ActionResult<object> GetDocumentFilePath(string id)
+    {
+        var path = _service.GetDocumentFilePath(id);
+        if (path is null)
+            return NotFound(new { error = "File not found" });
+
+        return Ok(new { path });
     }
 
     [HttpDelete("documents/{id}")]
@@ -279,6 +275,7 @@ public sealed class KnowledgeBaseController : ControllerBase
             };
 
             _service.AddMemoryEntry(entry);
+            _indexing?.EnqueueMemory(entry.Id);
             return CreatedAtAction(nameof(GetMemoryEntry), new { id = entry.Id }, entry);
         }
         catch (Exception ex)
@@ -299,6 +296,7 @@ public sealed class KnowledgeBaseController : ControllerBase
             if (entry == null)
                 return NotFound(new { error = "Memory entry not found" });
 
+            _indexing?.EnqueueMemory(entry.Id);
             return Ok(entry);
         }
         catch (Exception ex)
@@ -317,7 +315,11 @@ public sealed class KnowledgeBaseController : ControllerBase
                 return NotFound(new { error = "Memory entry not found" });
 
             if (_service.DeleteMemoryEntry(id))
+            {
+                _indexing?.RemoveMemory(id);
+                _vectors?.Remove(VectorIndexService.MemoryIndexKey(id));
                 return Ok(new { message = "Memory entry deleted" });
+            }
 
             return StatusCode(500, new { error = "Failed to delete" });
         }
@@ -328,11 +330,14 @@ public sealed class KnowledgeBaseController : ControllerBase
     }
 
     [HttpGet("memory/search")]
-    public ActionResult<List<MemoryEntry>> SearchMemory([FromQuery] string q)
+    public async Task<ActionResult<List<MemoryEntry>>> SearchMemory([FromQuery] string q, [FromQuery] int? max = null)
     {
         try
         {
-            var results = _service.SearchMemoryEntries(q);
+            // 与文档 /search 一致：配置了 embedding 时叠加分块语义相似度，未显式指定 max 时套用检索预算档位
+            var maxResults = Math.Clamp(max ?? (_profiles?.Get().MaxResults ?? 20), 1, 100);
+            var queryVector = await TryEmbedQueryAsync(q);
+            var results = _service.SearchMemoryEntries(q, maxResults, _vectors, queryVector);
             return Ok(results);
         }
         catch (Exception ex)

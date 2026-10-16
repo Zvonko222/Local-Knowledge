@@ -12,8 +12,8 @@
                     Margin="34,28,34,40"
                     HorizontalAlignment="Center">
             <StackPanel Margin="0,0,0,22">
-                <TextBlock Text="设置" Style="{StaticResource HeadingLarge}" />
-                <TextBlock Text="存储位置与服务连接"
+                <TextBlock Text="{DynamicResource Str_Set_Title}" Style="{StaticResource HeadingLarge}" />
+                <TextBlock Text="{DynamicResource Str_Set_Subtitle}"
                            Margin="0,6,0,0"
                            Style="{StaticResource BodyText}" />
             </StackPanel>
@@ -26,8 +26,8 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel>
-                            <TextBlock Text="数据目录" Style="{StaticResource HeadingMedium}" />
-                            <TextBlock Text="知识库、原始文件与索引数据都会保存在这里。"
+                            <TextBlock Text="{DynamicResource Str_DataDir}" Style="{StaticResource HeadingMedium}" />
+                            <TextBlock Text="{DynamicResource Str_DataDir_Desc}"
                                        Margin="0,4,0,0"
                                        Style="{StaticResource CaptionText}" />
                         </StackPanel>
@@ -35,7 +35,7 @@
                                 Padding="9,5"
                                 CornerRadius="12"
                                 Background="{StaticResource PrimarySoftBrush}">
-                            <TextBlock Text="本地存储"
+                            <TextBlock Text="{DynamicResource Str_Badge_Local}"
                                        Foreground="{StaticResource PrimaryDarkBrush}"
                                        FontSize="11"
                                        FontWeight="SemiBold" />
@@ -45,6 +45,8 @@
                     <Grid Margin="0,18,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
@@ -63,7 +65,7 @@
                                            Margin="0,0,7,0"
                                            FontFamily="{StaticResource IconFont}"
                                            FontSize="14" />
-                                <TextBlock Text="选择目录" />
+                                <TextBlock Text="{DynamicResource Str_Btn_PickDir}" />
                             </StackPanel>
                         </Button>
 
@@ -78,7 +80,7 @@
                                            Margin="0,0,7,0"
                                            FontFamily="{StaticResource IconFont}"
                                            FontSize="14" />
-                                <TextBlock Text="打开目录" />
+                                <TextBlock Text="{DynamicResource Str_Btn_OpenDir}" />
                             </StackPanel>
                         </Button>
 
@@ -93,14 +95,14 @@
                                            Margin="0,0,7,0"
                                            FontFamily="{StaticResource IconFont}"
                                            FontSize="14" />
-                                <TextBlock Text="备份" />
+                                <TextBlock Text="{DynamicResource Str_Btn_Backup}" />
                             </StackPanel>
                         </Button>
 
                         <Button Grid.Column="4"
                                 Width="76"
                                 Margin="8,0,0,0"
-                                Content="应用"
+                                Content="{DynamicResource Str_Btn_Apply}"
                                 Style="{StaticResource PrimaryButton}"
                                 Command="{Binding ApplyDirectoryCommand}" />
                     </Grid>
@@ -114,8 +116,8 @@
 
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,14">
                 <StackPanel>
-                    <TextBlock Text="API 服务" Style="{StaticResource HeadingMedium}" />
-                    <TextBlock Text="桌面客户端通过此地址访问本地 Web API。"
+                    <TextBlock Text="{DynamicResource Str_Api_Title}" Style="{StaticResource HeadingMedium}" />
+                    <TextBlock Text="{DynamicResource Str_Api_Desc}"
                                Margin="0,4,0,0"
                                Style="{StaticResource CaptionText}" />
 
@@ -154,7 +156,7 @@
                                            Margin="0,0,7,0"
                                            FontFamily="{StaticResource IconFont}"
                                            FontSize="14" />
-                                <TextBlock Text="测试连接" />
+                                <TextBlock Text="{DynamicResource Str_Btn_Test}" />
                             </StackPanel>
                         </Button>
                     </Grid>
@@ -178,8 +180,8 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel>
-                            <TextBlock Text="检索预算（token 消耗）" Style="{StaticResource HeadingMedium}" />
-                            <TextBlock Text="选择档位后，搜索、问答与 AI 检索自动按该档限制单次上下文规模。"
+                            <TextBlock Text="{DynamicResource Str_Profile_Title}" Style="{StaticResource HeadingMedium}" />
+                            <TextBlock Text="{DynamicResource Str_Profile_Desc}"
                                        Margin="0,4,0,0"
                                        Style="{StaticResource CaptionText}" />
                         </StackPanel>
@@ -202,7 +204,7 @@
                                 Height="38"
                                 Margin="10,0,0,0"
                                 Style="{StaticResource PrimaryButton}"
-                                Content="应用"
+                                Content="{DynamicResource Str_Btn_Apply}"
                                 Command="{Binding ApplyProfileCommand}" />
                     </Grid>
 
@@ -215,6 +217,66 @@
                                    Foreground="{StaticResource TextSecondaryBrush}"
                                    TextWrapping="Wrap" />
                     </Border>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,14">
+                <StackPanel>
+                    <TextBlock Text="语言 / Language" Style="{StaticResource HeadingMedium}" />
+                    <TextBlock Text="{DynamicResource Str_Lang_Desc}"
+                               Margin="0,4,0,0"
+                               Style="{StaticResource CaptionText}" />
+
+                    <Grid Margin="0,16,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="260" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <ComboBox Height="38"
+                                  VerticalContentAlignment="Center"
+                                  FontSize="13"
+                                  ItemsSource="{Binding LanguageOptions}"
+                                  SelectedItem="{Binding LanguageLabel}" />
+
+                        <Button Grid.Column="1"
+                                Width="96"
+                                Height="38"
+                                Margin="10,0,0,0"
+                                Style="{StaticResource PrimaryButton}"
+                                Content="{DynamicResource Str_Btn_Apply}"
+                                Command="{Binding ApplyLanguageCommand}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,14">
+                <StackPanel>
+                    <TextBlock Text="背景颜色" Style="{StaticResource HeadingMedium}" />
+                    <TextBlock Text="{DynamicResource Str_Theme_Desc}"
+                               Margin="0,4,0,0"
+                               Style="{StaticResource CaptionText}" />
+
+                    <Grid Margin="0,16,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="260" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <ComboBox Height="38"
+                                  VerticalContentAlignment="Center"
+                                  FontSize="13"
+                                  ItemsSource="{Binding BackgroundOptions}"
+                                  SelectedItem="{Binding BackgroundLabel}" />
+
+                        <Button Grid.Column="1"
+                                Width="96"
+                                Height="38"
+                                Margin="10,0,0,0"
+                                Style="{StaticResource PrimaryButton}"
+                                Content="{DynamicResource Str_Btn_Apply}"
+                                Command="{Binding ApplyBackgroundCommand}" />
+                    </Grid>
                 </StackPanel>
             </Border>
 
@@ -235,14 +297,28 @@
                                 Padding="9,5"
                                 CornerRadius="12"
                                 Background="#EAF3F8">
-                            <TextBlock Text="不出本机"
+                            <TextBlock Text="检索在本机"
                                        Foreground="#1F6F8B"
                                        FontSize="11"
                                        FontWeight="SemiBold" />
                         </Border>
                     </Grid>
 
-                    <Grid Margin="0,18,0,0">
+                    <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                        <TextBlock Text="服务商预设"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource HeadingSmall}" />
+                        <ComboBox Width="220"
+                                  Height="38"
+                                  Margin="10,0,0,0"
+                                  VerticalContentAlignment="Center"
+                                  FontSize="13"
+                                  ItemsSource="{Binding ProviderOptions}"
+                                  SelectedItem="{Binding SelectedProvider}"
+                                  ToolTip="选择后自动填充地址与示例模型（以 DeepSeek 填写方式为准）" />
+                    </StackPanel>
+
+                    <Grid Margin="0,12,0,0">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -255,7 +331,7 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
-                        <TextBox ToolTip="OpenAI 兼容接口地址，例如 https://open.bigmodel.cn/api/paas/v4 或 http://localhost:11434/v1"
+                        <TextBox ToolTip="OpenAI 兼容接口地址，例如 https://api.deepseek.com/v1 或 http://localhost:11434/v1"
                                  Text="{Binding LlmBaseUrl, UpdateSourceTrigger=PropertyChanged}"
                                  Style="{StaticResource ModernTextBox}" />
 
@@ -298,7 +374,7 @@
                                            Margin="0,0,7,0"
                                            FontFamily="{StaticResource IconFont}"
                                            FontSize="14" />
-                                <TextBlock Text="测试连接" />
+                                <TextBlock Text="{DynamicResource Str_Btn_Test}" />
                             </StackPanel>
                         </Button>
                     </Grid>

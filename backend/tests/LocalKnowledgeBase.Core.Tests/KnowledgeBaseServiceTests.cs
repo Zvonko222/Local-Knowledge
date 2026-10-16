@@ -111,6 +111,41 @@ public sealed class KnowledgeBaseServiceTests : IDisposable
         Assert.Equal(50, chunks[1].Length);
     }
 
+    [Fact]
+    public void ChunkTextOnBoundaries_SnapsToSentenceEnd()
+    {
+        var text = new string('a', 30) + "。" + new string('b', 30);
+
+        var chunks = KnowledgeBaseService.ChunkTextOnBoundaries(text, chunkSize: 50);
+
+        Assert.Equal(2, chunks.Count);
+        Assert.Equal(31, chunks[0].Length);
+        Assert.EndsWith("。", chunks[0]);
+    }
+
+    [Fact]
+    public void ChunkTextOnBoundaries_UniformTextMatchesFixedChunking()
+    {
+        var chunks = KnowledgeBaseService.ChunkTextOnBoundaries(new string('a', 120), chunkSize: 50);
+
+        Assert.Equal(3, chunks.Count);
+        Assert.Equal(50, chunks[0].Length);
+        Assert.Equal(50, chunks[1].Length);
+    }
+
+    [Fact]
+    public void ChunkTextOnBoundaries_BreaksAtNewline()
+    {
+        var text = new string('a', 20) + "\n" + new string('b', 60);
+
+        var chunks = KnowledgeBaseService.ChunkTextOnBoundaries(text, chunkSize: 50);
+
+        Assert.Equal(3, chunks.Count);
+        Assert.Equal(20, chunks[0].Length);
+        Assert.Equal(50, chunks[1].Length);
+        Assert.Equal(10, chunks[2].Length);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_dataDirectory))
